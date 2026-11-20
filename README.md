@@ -11,7 +11,9 @@ An empirical evaluation comparing specialized Time-Series Database (TSDB) archit
 ---
 
 ## Deliverables & Artifacts
-- **Research Paper (IEEE LaTeX):** [`paper.tex`](paper.tex)
+- **Research Paper (Compiled PDF):** [`DBMS_Project_2.pdf`](DBMS_Project_2.pdf)
+- **Research Paper (IEEE LaTeX Source):** [`paper.tex`](paper.tex)
+- **Plagiarism & Authenticity Report:** [`plagiarism_report.pdf`](plagiarism_report.pdf)
 - **Presentation Deck (PPTX):** [`G13_TimescaleDB_Presentation.pptx`](G13_TimescaleDB_Presentation.pptx)
 - **Empirical Results (JSON / CSV):** [`benchmark_output/benchmark_results.json`](benchmark_output/benchmark_results.json), [`benchmark_output/benchmark_summary.csv`](benchmark_output/benchmark_summary.csv)
 

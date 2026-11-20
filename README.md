@@ -36,7 +36,7 @@ To help non-technical evaluators, professors, and reviewers explore the project 
 - **Query Execution Profiler:** Multi-stage animated execution pipeline showing query acceleration (12 ms vs 518.9 ms) across 1,209,600 tuples with live buffer page tracking.
 - **Physical Storage Analysis:** Component disk breakdown comparing raw heap and B-tree index bloat against Gorilla-compressed columnar chunks (83.53% disk reduction).
 - **20-Node Telemetry Fleet:** Interactive factory floor matrix across 4 industrial zones showing real-time temperature, humidity, and battery decay curves.
-- **System Internals & Execution Plans:** Technical breakdown of hypertable chunk routing, Gorilla bit-packing mechanics, side-by-side `EXPLAIN ANALYZE` tree diffs, and oral examination defense rationale.
+- **System Internals & Execution Plans:** Technical breakdown of hypertable chunk routing, Gorilla bit-packing mechanics, and side-by-side `EXPLAIN ANALYZE` tree diffs.
 - **Academic Deliverables:** One-click links for the IEEE research paper, presentation deck, verified plagiarism audit, and source code.
 
 

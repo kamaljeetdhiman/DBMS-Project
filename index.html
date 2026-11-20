@@ -705,53 +705,6 @@ GROUP BY 1, 2 ORDER BY 1, 2;</div>
           </div>
         </div>
 
-        <!-- Viva Technical Defense & Rationale Accordion -->
-        <div class="pt-6 border-t border-white/10 space-y-3">
-          <h3 class="font-bold text-white text-sm font-mono flex items-center gap-2">
-            <i data-lucide="shield-alert" class="w-4 h-4 text-emerald-400"></i>
-            <span>Project Defense & Viva Technical Evaluation Rationale</span>
-          </h3>
-
-          <div class="space-y-2.5 text-xs">
-            
-            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
-              <div class="font-bold text-cyan-400 font-mono">1. Why did vanilla PostgreSQL maintain a nominal 1.4% higher raw bulk insertion throughput (29,142 vs 28,735 rows/sec)?</div>
-              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
-                Vanilla PostgreSQL writes directly to an unpartitioned heap block using straightforward append-only operations with no partition routing logic. TimescaleDB intercepts every batch at the tuple routing layer to extract timestamps, evaluate chunk boundary catalog entries, and dynamically allocate chunk partitions. This introduces a slight CPU routing cost of 1.4%, which prevents subsequent write stalls as tables expand beyond memory bounds.
-              </p>
-            </div>
-
-            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
-              <div class="font-bold text-cyan-400 font-mono">2. How does the Gorilla compression algorithm eliminate 83.53% of physical disk footprint?</div>
-              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
-                IoT telemetry exhibits predictable regularity. Fixed 10-second sampling results in zero second-order timestamp variation ($D' = D_i - D_{i-1} = 0$), which Gorilla bit-packs as a single '0' bit instead of an 8-byte integer. Environmental sensor parameters fluctuate continuously without abrupt discontinuities; XORing adjacent IEEE 754 float values leaves identical sign, exponent, and high-order mantissa bits, collapsing 64-bit double values down into approximately 11 to 14 bits.
-              </p>
-            </div>
-
-            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
-              <div class="font-bold text-cyan-400 font-mono">3. What is the cause of secondary B-Tree indexes occupying 48.5% of PostgreSQL's total storage?</div>
-              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
-                Standard B-Tree indexes require dedicated tree leaf and internal pages containing 6-byte tuple identifiers (ItemPointer/TID) plus full attribute keys for every single inserted tuple. For narrow IoT records (timestamp, sensor_id, and 3 float readings = ~32 bytes), secondary indexes on (time) and (sensor_id, time DESC) contribute 74.24 MB of index structures on top of 78.75 MB of heap tuples.
-              </p>
-            </div>
-
-            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
-              <div class="font-bold text-cyan-400 font-mono">4. What operational trade-offs accompany hypertable chunk compression?</div>
-              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
-                Compressed chunks are transformed into read-only columnar representations. Any subsequent DML modifications (UPDATE, DELETE, or late-arriving out-of-order data older than the compression policy threshold) require explicit chunk decompression before execution. Consequently, the compression policy must be configured past the maximum expected network jitter window (e.g., 2 hours).
-              </p>
-            </div>
-
-            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
-              <div class="font-bold text-cyan-400 font-mono">5. Is standard SQL syntax and relational integrity preserved under TimescaleDB?</div>
-              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
-                TimescaleDB is implemented directly as a PostgreSQL C extension rather than an independent external engine. Hypertables support standard SQL SELECT, complex JOIN operations against relational metadata tables, window functions, user-defined functions, and standard client drivers (including psycopg2, libpq, and JDBC) without query modification.
-              </p>
-            </div>
-
-          </div>
-        </div>
-
       </div>
 
     </div>

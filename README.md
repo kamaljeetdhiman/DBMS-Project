@@ -23,7 +23,7 @@ An empirical evaluation comparing specialized Time-Series Database (TSDB) archit
 
 ## ⚡ Quick Evaluation: Interactive Web Dashboard
 
-To help non-technical evaluators, professors, and reviewers explore the project findings without running command-line benchmarks or inspecting database schemas:
+An interactive web dashboard is provided to inspect query benchmarks, physical storage breakdowns, and real-time telemetry metrics directly in any modern browser:
 
 1. **Option 1 (Double-Click Launcher - Windows):**
    - Double-click `start_interface.bat`. It starts a local server and opens your web browser automatically.

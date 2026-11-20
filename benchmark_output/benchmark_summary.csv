@@ -1,0 +1,11 @@
+metric_category,system,metric_name,value,unit
+ingestion,plain_postgres,throughput,29141.48924139356,rows_sec
+ingestion,timescaledb,throughput,28731.235128384207,rows_sec
+storage,plain_postgres,total_disk,152.99,MB
+storage,timescaledb_uncompressed,total_disk,0.02,MB
+storage,timescaledb_compressed,total_disk,0.02,MB
+storage,timescaledb_cagg,total_disk,0.0,MB
+query_latency,plain_date_trunc,mean_ms,518.896,ms
+query_latency,timescale_time_bucket,mean_ms,348.69,ms
+query_latency,timescale_cagg,mean_ms,12.005,ms
+query_speedup,cagg_vs_plain,factor,43.22,x

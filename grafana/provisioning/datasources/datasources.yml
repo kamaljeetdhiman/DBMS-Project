@@ -1,0 +1,40 @@
+apiVersion: 1
+
+datasources:
+  # TimescaleDB Datasource (PostgreSQL driver with TimescaleDB enabled)
+  - name: TimescaleDB-IoT
+    type: postgres
+    access: proxy
+    url: timescaledb:5432
+    user: postgres
+    isDefault: true
+    jsonData:
+      database: iot_timeseries_db
+      sslmode: disable
+      maxOpenConns: 50
+      maxIdleConns: 20
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: true
+    secureJsonData:
+      password: postgrespassword
+    editable: true
+
+  # Plain PostgreSQL Datasource
+  - name: PostgreSQL-Plain
+    type: postgres
+    access: proxy
+    url: postgres_plain:5432
+    user: postgres
+    isDefault: false
+    jsonData:
+      database: iot_plain_db
+      sslmode: disable
+      maxOpenConns: 50
+      maxIdleConns: 20
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: postgrespassword
+    editable: true

@@ -1,0 +1,146 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. TimescaleDB Service (PostgreSQL 16 with TimescaleDB Extension)
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: iot_timescaledb
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: iot_timeseries_db
+      TIMESCALEDB_TELEMETRY: "off"
+    command: >
+      postgres
+      -c shared_buffers=1024MB
+      -c effective_cache_size=3072MB
+      -c work_mem=64MB
+      -c maintenance_work_mem=256MB
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c timescaledb.max_background_workers=8
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c checkpoint_timeout=15min
+      -c max_wal_size=4GB
+      -c min_wal_size=1GB
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iot_timeseries_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iot_bench_network
+
+  # ---------------------------------------------------------------------------
+  # 2. Standalone Plain PostgreSQL Service (PostgreSQL 16 Baseline)
+  # ---------------------------------------------------------------------------
+  postgres_plain:
+    image: postgres:16-alpine
+    container_name: iot_postgres_plain
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: iot_plain_db
+    command: >
+      postgres
+      -c shared_buffers=1024MB
+      -c effective_cache_size=3072MB
+      -c work_mem=64MB
+      -c maintenance_work_mem=256MB
+      -c max_worker_processes=8
+      -c max_parallel_workers_per_gather=4
+      -c max_parallel_workers=8
+      -c wal_buffers=16MB
+      -c checkpoint_completion_target=0.9
+      -c checkpoint_timeout=15min
+      -c max_wal_size=4GB
+      -c min_wal_size=1GB
+    volumes:
+      - postgres_plain_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d iot_plain_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - iot_bench_network
+
+  # ---------------------------------------------------------------------------
+  # 3. Grafana Service (Visualization & Automated Provisioning)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:latest
+    container_name: iot_grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=grafana-clock-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    networks:
+      - iot_bench_network
+
+  # ---------------------------------------------------------------------------
+  # 4. Optional Containerized Benchmark Runner
+  # ---------------------------------------------------------------------------
+  benchmark_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: iot_benchmark_runner
+    profiles: ["manual"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      postgres_plain:
+        condition: service_healthy
+    environment:
+      - TIMESCALE_HOST=timescaledb
+      - TIMESCALE_PORT=5432
+      - TIMESCALE_USER=postgres
+      - TIMESCALE_PASSWORD=postgrespassword
+      - TIMESCALE_DB=iot_timeseries_db
+      - POSTGRES_HOST=postgres_plain
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgrespassword
+      - POSTGRES_DB=iot_plain_db
+    volumes:
+      - ./:/workspace
+    working_dir: /workspace
+    command: ["python", "benchmark.py", "--host-ts", "timescaledb", "--host-pg", "postgres_plain", "--output-dir", "/workspace/benchmark_output"]
+    networks:
+      - iot_bench_network
+
+volumes:
+  timescaledb_data:
+    name: iot_timescaledb_data
+  postgres_plain_data:
+    name: iot_postgres_plain_data
+  grafana_data:
+    name: iot_grafana_data
+
+networks:
+  iot_bench_network:
+    name: iot_bench_network
+    driver: bridge

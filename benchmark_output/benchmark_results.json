@@ -1,0 +1,134 @@
+{
+  "metadata": {
+    "timestamp": "2026-11-17T18:46:49.728180+00:00",
+    "sensors": 20,
+    "duration_days": 7,
+    "sampling_interval_seconds": 10,
+    "total_tuples": 1209600
+  },
+  "ingestion": {
+    "plain_postgres": {
+      "table": "sensor_data_plain",
+      "total_rows": 1209600,
+      "elapsed_seconds": 41.50783063899985,
+      "throughput_rows_per_sec": 29141.48924139356,
+      "batch_latency_mean_sec": 0.30694486395041093,
+      "batch_latency_p50_sec": 0.28959480200001053,
+      "batch_latency_p95_sec": 0.40973018900012903,
+      "batch_latency_p99_sec": 0.477851254999905,
+      "batch_latency_max_sec": 0.5329872790000536
+    },
+    "timescaledb": {
+      "table": "sensor_data_ts",
+      "total_rows": 1209600,
+      "elapsed_seconds": 42.10052211800007,
+      "throughput_rows_per_sec": 28731.235128384207,
+      "batch_latency_mean_sec": 0.3122302698264392,
+      "batch_latency_p50_sec": 0.29651834400010557,
+      "batch_latency_p95_sec": 0.4115578840001035,
+      "batch_latency_p99_sec": 0.4557926429999952,
+      "batch_latency_max_sec": 0.48445624700002554
+    }
+  },
+  "storage": {
+    "plain_postgres": {
+      "total_bytes": 160423936,
+      "heap_bytes": 82575360,
+      "indexes_bytes": 77799424,
+      "total_mb": 152.99,
+      "heap_mb": 78.75,
+      "indexes_mb": 74.2
+    },
+    "timescaledb_uncompressed": {
+      "total_bytes": 16384,
+      "heap_bytes": 0,
+      "indexes_bytes": 16384,
+      "chunk_count": 7,
+      "total_mb": 0.02,
+      "heap_mb": 0.0,
+      "indexes_mb": 0.02,
+      "cagg_bytes": 0,
+      "cagg_mb": 0.0
+    },
+    "timescaledb_compressed": {
+      "total_bytes": 16384,
+      "total_mb": 0.02,
+      "uncompressed_total_bytes": 168017920,
+      "compressed_total_bytes": 27664384,
+      "compression_ratio": 6.07,
+      "space_saving_percent": 83.53,
+      "chunks_compressed": 7,
+      "compress_duration_sec": 2.563
+    }
+  },
+  "query_performance": {
+    "Q1_Plain_date_trunc": {
+      "runs": 30,
+      "row_count": 3360,
+      "mean_ms": 518.896,
+      "median_ms": 512.398,
+      "std_dev_ms": 26.489,
+      "min_ms": 490.54,
+      "max_ms": 607.337,
+      "p95_ms": 584.591,
+      "p99_ms": 607.337,
+      "explain_summary": "Sort  (cost=58696.35..58998.75 rows=120960 width=52) (actual time=594.032..594.255 rows=3360 loops=1)",
+      "full_explain_plan": "Sort  (cost=58696.35..58998.75 rows=120960 width=52) (actual time=594.032..594.255 rows=3360 loops=1)\n  Sort Key: sensor_id, (date_trunc('hour'::text, \"time\"))\n  Sort Method: quicksort  Memory: 359kB\n  Buffers: shared hit=10080\n  ->  HashAggregate  (cost=46368.00..48484.80 rows=120960 width=52) (actual time=590.254..592.106 rows=3360 loops=1)\n        Group Key: sensor_id, date_trunc('hour'::text, \"time\")\n        Batches: 1  Memory Usage: 8209kB\n        Buffers: shared hit=10080\n        ->  Seq Scan on sensor_data_plain  (cost=0.00..25200.00 rows=1209600 width=28) (actual time=0.021..278.533 rows=1209600 loops=1)\n              Buffers: shared hit=10080\nPlanning Time: 0.116 ms\nExecution Time: 599.708 ms"
+    },
+    "Q2_Timescale_time_bucket": {
+      "runs": 30,
+      "row_count": 3360,
+      "mean_ms": 348.69,
+      "median_ms": 345.313,
+      "std_dev_ms": 12.699,
+      "min_ms": 333.733,
+      "max_ms": 380.148,
+      "p95_ms": 376.795,
+      "p99_ms": 380.148,
+      "explain_summary": "Finalize GroupAggregate  (cost=155.11..40017.67 rows=40000 width=52) (actual time=2.356..471.778 rows=3360 loops=1)",
+      "full_explain_plan": "Finalize GroupAggregate  (cost=155.11..40017.67 rows=40000 width=52) (actual time=2.356..471.778 rows=3360 loops=1)\n  Group Key: sensor_data_ts.sensor_id, (time_bucket('01:00:00'::interval, sensor_data_ts.\"time\"))\n  Buffers: shared hit=9046\n  ->  Merge Append  (cost=155.11..37189.76 rows=121595 width=100) (actual time=2.121..465.958 rows=3360 loops=1)\n        Sort Key: sensor_data_ts.sensor_id, (time_bucket('01:00:00'::interval, sensor_data_ts.\"time\"))\n        Buffers: shared hit=9046\n        ->  Partial GroupAggregate  (cost=22.15..4982.58 rows=17407 width=100) (actual time=0.306..71.296 rows=480 loops=1)\n              Group Key: _hyper_3_9_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_9_chunk.\"time\")\n              Buffers: shared hit=1284\n              ->  Custom Scan (ColumnarScan) on _hyper_3_9_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.204..34.520 rows=172800 loops=1)\n                    Buffers: shared hit=1284\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.106..0.198 rows=180 loops=1)\n                          Sort Key: _hyper_3_9_chunk_compressed.sensor_id, _hyper_3_9_chunk_compressed._ts_meta_v2_first_time, _hyper_3_9_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_9_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.024..0.041 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4980.99 rows=17280 width=100) (actual time=0.267..64.792 rows=480 loops=1)\n              Group Key: _hyper_3_10_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_10_chunk.\"time\")\n              Buffers: shared hit=1284\n              ->  Custom Scan (ColumnarScan) on _hyper_3_10_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.173..31.170 rows=172800 loops=1)\n                    Buffers: shared hit=1284\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.074..0.165 rows=180 loops=1)\n                          Sort Key: _hyper_3_10_chunk_compressed.sensor_id, _hyper_3_10_chunk_compressed._ts_meta_v2_first_time, _hyper_3_10_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_10_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.003..0.020 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4982.58 rows=17407 width=100) (actual time=0.251..64.943 rows=480 loops=1)\n              Group Key: _hyper_3_11_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_11_chunk.\"time\")\n              Buffers: shared hit=1285\n              ->  Custom Scan (ColumnarScan) on _hyper_3_11_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.159..31.135 rows=172800 loops=1)\n                    Buffers: shared hit=1285\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.075..0.162 rows=180 loops=1)\n                          Sort Key: _hyper_3_11_chunk_compressed.sensor_id, _hyper_3_11_chunk_compressed._ts_meta_v2_first_time, _hyper_3_11_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_11_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.006..0.023 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4982.58 rows=17407 width=100) (actual time=0.238..66.430 rows=480 loops=1)\n              Group Key: _hyper_3_12_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_12_chunk.\"time\")\n              Buffers: shared hit=1286\n              ->  Custom Scan (ColumnarScan) on _hyper_3_12_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.145..32.841 rows=172800 loops=1)\n                    Buffers: shared hit=1286\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.071..0.177 rows=180 loops=1)\n                          Sort Key: _hyper_3_12_chunk_compressed.sensor_id, _hyper_3_12_chunk_compressed._ts_meta_v2_first_time, _hyper_3_12_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_12_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.003..0.019 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4982.58 rows=17407 width=100) (actual time=0.279..66.595 rows=480 loops=1)\n              Group Key: _hyper_3_13_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_13_chunk.\"time\")\n              Buffers: shared hit=1300\n              ->  Custom Scan (ColumnarScan) on _hyper_3_13_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.185..31.670 rows=172800 loops=1)\n                    Buffers: shared hit=1300\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.075..0.166 rows=180 loops=1)\n                          Sort Key: _hyper_3_13_chunk_compressed.sensor_id, _hyper_3_13_chunk_compressed._ts_meta_v2_first_time, _hyper_3_13_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_13_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.009..0.025 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4982.58 rows=17407 width=100) (actual time=0.441..64.383 rows=480 loops=1)\n              Group Key: _hyper_3_14_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_14_chunk.\"time\")\n              Buffers: shared hit=1303\n              ->  Custom Scan (ColumnarScan) on _hyper_3_14_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.328..31.425 rows=172800 loops=1)\n                    Buffers: shared hit=1303\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.112..0.208 rows=180 loops=1)\n                          Sort Key: _hyper_3_14_chunk_compressed.sensor_id, _hyper_3_14_chunk_compressed._ts_meta_v2_first_time, _hyper_3_14_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_14_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.004..0.020 rows=180 loops=1)\n                                Buffers: shared hit=4\n        ->  Partial GroupAggregate  (cost=22.15..4980.99 rows=17280 width=100) (actual time=0.336..66.336 rows=480 loops=1)\n              Group Key: _hyper_3_15_chunk.sensor_id, time_bucket('01:00:00'::interval, _hyper_3_15_chunk.\"time\")\n              Buffers: shared hit=1304\n              ->  Custom Scan (ColumnarScan) on _hyper_3_15_chunk  (cost=22.15..1740.99 rows=172800 width=28) (actual time=0.220..30.668 rows=172800 loops=1)\n                    Buffers: shared hit=1304\n                    ->  Sort  (cost=12.54..12.99 rows=180 width=120) (actual time=0.108..0.201 rows=180 loops=1)\n                          Sort Key: _hyper_3_15_chunk_compressed.sensor_id, _hyper_3_15_chunk_compressed._ts_meta_v2_first_time, _hyper_3_15_chunk_compressed._ts_meta_v2_last_time\n                          Sort Method: quicksort  Memory: 50kB\n                          Buffers: shared hit=4\n                          ->  Seq Scan on _hyper_3_15_chunk_compressed  (cost=0.00..5.80 rows=180 width=120) (actual time=0.006..0.026 rows=180 loops=1)\n                                Buffers: shared hit=4\nPlanning:\n  Buffers: shared hit=73\nPlanning Time: 1.667 ms\nExecution Time: 473.028 ms"
+    },
+    "Q3_Timescale_Continuous_Aggregate": {
+      "runs": 30,
+      "row_count": 3360,
+      "mean_ms": 12.005,
+      "median_ms": 11.903,
+      "std_dev_ms": 0.791,
+      "min_ms": 10.929,
+      "max_ms": 13.983,
+      "p95_ms": 13.754,
+      "p99_ms": 13.983,
+      "explain_summary": "Incremental Sort  (cost=1.18..226.65 rows=3360 width=52) (actual time=0.131..1.476 rows=3360 loops=1)",
+      "full_explain_plan": "Incremental Sort  (cost=1.18..226.65 rows=3360 width=52) (actual time=0.131..1.476 rows=3360 loops=1)\n  Sort Key: _hyper_4_16_chunk.sensor_id, _hyper_4_16_chunk.bucket\n  Presorted Key: _hyper_4_16_chunk.sensor_id\n  Full-sort Groups: 20  Sort Method: quicksort  Average Memory: 30kB  Peak Memory: 30kB\n  Pre-sorted Groups: 20  Sort Method: quicksort  Average Memory: 38kB  Peak Memory: 38kB\n  Buffers: shared hit=932\n  ->  Index Scan using _hyper_4_16_chunk__materialized_hypertable_4_sensor_id_bucket_i on _hyper_4_16_chunk  (cost=0.28..112.26 rows=3360 width=52) (actual time=0.018..0.550 rows=3360 loops=1)\n        Buffers: shared hit=932\nPlanning:\n  Buffers: shared hit=9\nPlanning Time: 0.372 ms\nExecution Time: 1.660 ms"
+    },
+    "Q4_Single_Sensor_Plain": {
+      "runs": 30,
+      "row_count": 168,
+      "mean_ms": 43.282,
+      "median_ms": 42.524,
+      "std_dev_ms": 4.657,
+      "min_ms": 36.176,
+      "max_ms": 52.138,
+      "p95_ms": 51.618,
+      "p99_ms": 52.138,
+      "explain_summary": "Sort  (cost=16890.82..16983.95 rows=37252 width=32) (actual time=38.668..38.680 rows=168 loops=1)",
+      "full_explain_plan": "Sort  (cost=16890.82..16983.95 rows=37252 width=32) (actual time=38.668..38.680 rows=168 loops=1)\n  Sort Key: (date_trunc('hour'::text, \"time\"))\n  Sort Method: quicksort  Memory: 34kB\n  Buffers: shared hit=10497\n  ->  HashAggregate  (cost=13503.68..14062.46 rows=37252 width=32) (actual time=38.409..38.605 rows=168 loops=1)\n        Group Key: date_trunc('hour'::text, \"time\")\n        Batches: 1  Memory Usage: 1585kB\n        Buffers: shared hit=10497\n        ->  Bitmap Heap Scan on sensor_data_plain  (cost=2004.40..12935.97 rows=56771 width=16) (actual time=5.690..27.436 rows=60480 loops=1)\n              Recheck Cond: (sensor_id = 7)\n              Heap Blocks: exact=10080\n              Buffers: shared hit=10497\n              ->  Bitmap Index Scan on idx_sensor_plain_sensor_time  (cost=0.00..1990.21 rows=56771 width=0) (actual time=4.134..4.135 rows=60480 loops=1)\n                    Index Cond: (sensor_id = 7)\n                    Buffers: shared hit=417\nPlanning Time: 0.118 ms\nExecution Time: 40.134 ms"
+    },
+    "Q4_Single_Sensor_CAGG": {
+      "runs": 30,
+      "row_count": 168,
+      "mean_ms": 1.565,
+      "median_ms": 1.12,
+      "std_dev_ms": 1.439,
+      "min_ms": 0.869,
+      "max_ms": 7.417,
+      "p95_ms": 5.149,
+      "p99_ms": 7.417,
+      "explain_summary": "Index Scan Backward using _hyper_4_16_chunk__materialized_hypertable_4_sensor_id_bucket_i on _hyper_4_16_chunk  (cost=0.28..43.75 rows=168 width=32) (actual time=0.023..0.078 rows=168 loops=1)",
+      "full_explain_plan": "Index Scan Backward using _hyper_4_16_chunk__materialized_hypertable_4_sensor_id_bucket_i on _hyper_4_16_chunk  (cost=0.28..43.75 rows=168 width=32) (actual time=0.023..0.078 rows=168 loops=1)\n  Index Cond: (sensor_id = 7)\n  Buffers: shared hit=48\nPlanning:\n  Buffers: shared hit=10\nPlanning Time: 0.281 ms\nExecution Time: 0.109 ms"
+    },
+    "speedup_cagg_vs_plain": 43.22,
+    "speedup_cagg_vs_hypertable": 29.05,
+    "speedup_single_sensor_cagg_vs_plain": 27.66
+  }
+}

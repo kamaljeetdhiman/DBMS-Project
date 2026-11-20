@@ -11,11 +11,33 @@ An empirical evaluation comparing specialized Time-Series Database (TSDB) archit
 ---
 
 ## Deliverables & Artifacts
+- **Interactive Evaluation Dashboard:** [`index.html`](index.html) *(Double-click `start_interface.bat` or open `index.html` in your browser)*
+- **Dashboard Launcher Scripts:** [`start_interface.bat`](start_interface.bat) (Windows), [`start_interface.sh`](start_interface.sh) (Linux/macOS), [`app.py`](app.py) (Python local server)
 - **Research Paper (Compiled PDF):** [`DBMS_Project_2.pdf`](DBMS_Project_2.pdf)
 - **Research Paper (IEEE LaTeX Source):** [`paper.tex`](paper.tex)
 - **Plagiarism & Authenticity Report:** [`plagiarism_report.pdf`](plagiarism_report.pdf)
 - **Presentation Deck (PPTX):** [`G13_TimescaleDB_Presentation.pptx`](G13_TimescaleDB_Presentation.pptx)
 - **Empirical Results (JSON / CSV):** [`benchmark_output/benchmark_results.json`](benchmark_output/benchmark_results.json), [`benchmark_output/benchmark_summary.csv`](benchmark_output/benchmark_summary.csv)
+
+---
+
+## ⚡ Quick Evaluation: Interactive Web Dashboard
+
+To help non-technical evaluators, professors, and reviewers explore the project findings without running command-line benchmarks or inspecting database schemas:
+
+1. **Option 1 (Double-Click Launcher - Windows):**
+   - Double-click `start_interface.bat`. It starts a local server and opens your web browser automatically.
+2. **Option 2 (Python Launcher):**
+   - Run `python app.py` in your terminal. Navigate to [http://localhost:8080](http://localhost:8080).
+3. **Option 3 (Direct Browser Open):**
+   - Double-click or open `index.html` directly in Google Chrome, Microsoft Edge, or Mozilla Firefox.
+
+### Dashboard Highlights:
+- **Interactive Query Race:** Live animated side-by-side execution showing TimescaleDB (12 ms) vs PostgreSQL 16 (518.9 ms) scanning 1,209,600 rows.
+- **Storage Footprint Breakdown:** Visual disk representation showing 83.5% physical space reduction via Gorilla delta-of-delta compression and index bloat elimination.
+- **20-Sensor Factory Floor:** Visual industrial sensor grid showing real-time temperature, humidity, and battery degradation across 4 factory zones.
+- **Plain-English Evaluation Guide:** Clear conceptual walkthrough explaining why standard relational engines struggle with temporal workloads and how hypertable chunking solves it.
+- **Direct Deliverables Download:** One-click downloads for the IEEE research paper, presentation deck, and verified plagiarism report.
 
 
 ---

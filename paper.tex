@@ -384,83 +384,68 @@ where $\Delta B_i = 4.0 + 0.4i$ (\%) represents total weekly power drain, and $\
 \subsection{System Architecture and Benchmarking Pipeline}
 Fig.~\ref{fig:bench_arch} outlines the benchmarking infrastructure. The driver generates telemetry records, streams batches to both database targets, triggers chunk compression, refreshes Continuous Aggregates, and records query latencies.
 
-\subsection{Database Schemas and Indexes}
-Both databases share matching column types and indexing definitions:
+\subsection{Workload Mapping and Database Schemas}
+Each telemetry observation records a timestamp, sensor identifier, and three double-precision physical readings (ambient temperature in $^{\circ}\text{C}$, relative humidity percentage, and battery voltage percentage):
 
 \noindent\begin{minipage}{\columnwidth}\footnotesize
 \begin{verbatim}
--- PostgreSQL 16 Baseline Schema
-CREATE TABLE sensor_data_plain (
-    time TIMESTAMPTZ NOT NULL,
-    sensor_id INTEGER NOT NULL,
-    temperature DOUBLE PRECISION NOT NULL,
-    humidity DOUBLE PRECISION NOT NULL,
-    battery_level DOUBLE PRECISION NOT NULL
-);
-CREATE INDEX idx_sensor_plain_time 
-    ON sensor_data_plain (time);
-CREATE INDEX idx_sensor_plain_sensor_time 
-    ON sensor_data_plain (sensor_id, time DESC);
-
--- TimescaleDB Hypertable & Continuous Aggregate
-CREATE TABLE sensor_data_ts (
-    time TIMESTAMPTZ NOT NULL,
-    sensor_id INTEGER NOT NULL,
-    temperature DOUBLE PRECISION NOT NULL,
-    humidity DOUBLE PRECISION NOT NULL,
-    battery_level DOUBLE PRECISION NOT NULL
-);
-SELECT create_hypertable('sensor_data_ts', 'time',
-    chunk_time_interval => INTERVAL '1 day');
-CREATE INDEX idx_sensor_ts_sensor_time 
-    ON sensor_data_ts (sensor_id, time DESC);
-
-CREATE MATERIALIZED VIEW sensor_hourly_cagg
-WITH (timescaledb.continuous) AS
-SELECT sensor_id, time_bucket('1 hour', time) AS bucket,
-    AVG(temperature) AS avg_temp,
-    MIN(temperature) AS min_temp,
-    MAX(temperature) AS max_temp,
-    AVG(humidity) AS avg_humidity,
-    COUNT(*) AS sample_count
-FROM sensor_data_ts
-GROUP BY sensor_id, bucket;
-
-ALTER TABLE sensor_data_ts SET (
-    timescaledb.compress,
-    timescaledb.compress_segmentby = 'sensor_id',
-    timescaledb.compress_orderby = 'time DESC'
-);
+{ "time": "2026-11-10T08:00:10Z", "sensor_id": 7,
+  "temperature": 21.43, "humidity": 68.21,
+  "battery_level": 98.75 }
 \end{verbatim}\end{minipage}\par\vspace{3pt}
 
+PostgreSQL stores records in a standard heap table \code{sensor\_data\_plain(time TIMESTAMPTZ, sensor\_id INT, temperature FLOAT, humidity FLOAT, battery\_level FLOAT)}. We create a primary B-Tree index on \code{time} for temporal range queries and a composite B-Tree index on \code{(sensor\_id, time DESC)} to support single-device drill-down queries.
+
+TimescaleDB defines the identical relation \code{sensor\_data\_ts}, converted to a hypertable partitioned by time into 1-day chunks using \code{create\_hypertable('sensor\_data\_ts', 'time', chunk\_time\_interval => INTERVAL '1 day')}. Hourly summary rollups are declared through Continuous Aggregate view \code{sensor\_hourly\_cagg}, grouping by \code{sensor\_id} and \code{time\_bucket('1 hour', time)} to pre-calculate \code{AVG}, \code{MIN}, and \code{MAX} metrics. Historical chunks are compressed using \code{timescaledb.compress\_segmentby = 'sensor\_id'} and \code{timescaledb.compress\_orderby = 'time DESC'}, converting closed horizontal row pages into compressed columnar slices.
+
 \subsection{Benchmark Queries}
-Table~\ref{tab:query_definitions} details the four queries tested across both engines.
+Table~\ref{tab:query_definitions} lists the four benchmark queries evaluated across both engines.
 
 \begin{table*}[t]
 \caption{Benchmark Query Definitions Tested on Both Engines}
 \label{tab:query_definitions}
 \centering
 \scriptsize
-\newcommand{\cl}[1]{\begin{tabular}[t]{@{}l@{}}#1\end{tabular}}
-\newcommand{\tc}[1]{\texttt{#1}}
 \renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}p{3.2cm}p{6.8cm}p{6.8cm}@{}}
+\begin{tabularx}{\textwidth}{@{}p{2.6cm}XX@{}}
 \toprule
 \textbf{Query Target} & \textbf{PostgreSQL 16 Baseline} & \textbf{TimescaleDB} \\ \midrule
 \textbf{Q1 / Q2: Global Hourly Rollup} & 
-\cl{\tc{SELECT date\_trunc(\sq hour\sq, time) AS bkt, sensor\_id,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature),}\\\tc{\ \ AVG(humidity), COUNT(*)}\\\tc{FROM sensor\_data\_plain GROUP BY bkt, sensor\_id;}} &
-\cl{\tc{SELECT time\_bucket(\sq 1 hour\sq, time) AS bkt, sensor\_id,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature),}\\\tc{\ \ AVG(humidity), COUNT(*)}\\\tc{FROM sensor\_data\_ts GROUP BY bkt, sensor\_id;}} \\ \addlinespace[0.5ex]
-\textbf{Q3: Pre-Materialized Continuous Aggregate Rollup} & 
-\cl{\tc{-- Not supported natively without full}\\\tc{-- historical re-scans; evaluated via Q1}} &
-\cl{\tc{SELECT bucket, sensor\_id, avg\_temp, min\_temp,}\\\tc{\ \ max\_temp, avg\_humidity, sample\_count}\\\tc{FROM sensor\_hourly\_cagg;}} \\ \addlinespace[0.5ex]
-\textbf{Q4: Single-Sensor Rollup (Sensor 7)} & 
-\cl{\tc{SELECT date\_trunc(\sq hour\sq, time) AS bkt,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature)}\\\tc{FROM sensor\_data\_plain WHERE sensor\_id = 7}\\\tc{GROUP BY bkt ORDER BY bkt DESC;}} &
-\cl{\tc{SELECT bucket, avg\_temp, min\_temp, max\_temp}\\\tc{FROM sensor\_hourly\_cagg}\\\tc{WHERE sensor\_id = 7}\\\tc{ORDER BY bucket DESC;}} \\ \bottomrule
-\end{tabular}
+\texttt{SELECT date\_trunc(\sq hour\sq, time) AS bkt,}\newline
+\texttt{\ \ sensor\_id, AVG(temperature),}\newline
+\texttt{\ \ MIN(temperature), MAX(temperature),}\newline
+\texttt{\ \ AVG(humidity), COUNT(*)}\newline
+\texttt{FROM sensor\_data\_plain}\newline
+\texttt{GROUP BY bkt, sensor\_id;} &
+\texttt{SELECT time\_bucket(\sq 1 hour\sq, time) AS bkt,}\newline
+\texttt{\ \ sensor\_id, AVG(temperature),}\newline
+\texttt{\ \ MIN(temperature), MAX(temperature),}\newline
+\texttt{\ \ AVG(humidity), COUNT(*)}\newline
+\texttt{FROM sensor\_data\_ts}\newline
+\texttt{GROUP BY bkt, sensor\_id;} \\ \addlinespace[0.6ex]
+\textbf{Q3: Continuous Aggregate Rollup} & 
+\textit{Not natively supported without full historical scans; evaluated via Query Q1 above.} &
+\texttt{SELECT bucket, sensor\_id,}\newline
+\texttt{\ \ avg\_temp, min\_temp, max\_temp,}\newline
+\texttt{\ \ avg\_humidity, sample\_count}\newline
+\texttt{FROM sensor\_hourly\_cagg;} \\ \addlinespace[0.6ex]
+\textbf{Q4: Single-Sensor Filter (Sensor 7)} & 
+\texttt{SELECT date\_trunc(\sq hour\sq, time) AS bkt,}\newline
+\texttt{\ \ AVG(temperature), MIN(temperature),}\newline
+\texttt{\ \ MAX(temperature)}\newline
+\texttt{FROM sensor\_data\_plain}\newline
+\texttt{WHERE sensor\_id = 7}\newline
+\texttt{GROUP BY bkt ORDER BY bkt DESC;} &
+\texttt{SELECT bucket, avg\_temp, min\_temp,}\newline
+\texttt{\ \ max\_temp}\newline
+\texttt{FROM sensor\_hourly\_cagg}\newline
+\texttt{WHERE sensor\_id = 7}\newline
+\texttt{ORDER BY bucket DESC;} \\ \bottomrule
+\end{tabularx}
 \end{table*}
 
 \subsection{Execution Protocol}
-Algorithm~\ref{alg:bench} details the benchmark execution flow. Rows are streamed in batches of $B = 10{,}000$ to maintain steady socket throughput without exhausting client memory.
+Algorithm~\ref{alg:bench} gives the execution procedure. Rows stream in batches of $B = 10{,}000$ to balance TCP socket utilization with client memory.
 
 \begin{algorithm}[t]
 \caption{Benchmarking Pipeline Protocol}

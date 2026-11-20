@@ -28,7 +28,7 @@
 \begin{document}
 
 % -----------------------------------------------------------------------------
-% TITLE & AUTHOR BLOCK (Group G13, Matching Reference Layout)
+% TITLE & AUTHOR BLOCK (Group G13, NIT Jalandhar)
 % -----------------------------------------------------------------------------
 \title{Benchmarking Specialized Time-Series Database Engines Against Relational Baselines in Industrial IoT Telemetry: A Micro-Architectural Evaluation of TimescaleDB and PostgreSQL 16}
 
@@ -54,7 +54,7 @@
 % ABSTRACT
 % -----------------------------------------------------------------------------
 \begin{abstract}
-High-frequency Internet of Things (IoT) monitoring systems generate massive, append-heavy telemetry streams that strain traditional relational database architectures. Relational database management systems (RDBMS) relying on monolithic $B^+$-Tree index structures experience severe write amplification, leaf-page fragmentation, and buffer cache thrashing as data volumes outgrow dedicated buffer pools. In this work, we present an empirical investigation comparing TimescaleDB against an optimized baseline PostgreSQL 16 instance. We model an industrial environment containing 20 IoT temperature and environmental sensor nodes streaming observations at 10-second intervals across a continuous 1-week horizon, synthesizing 1,209,600 telemetry tuples. Under standardized system constraints (1024\,MB shared buffer pool), we evaluate bulk streaming throughput, physical disk storage footprints, and analytical query execution times for hourly rolling downsampling. Our benchmark reveals that while raw bulk insertion rates remain near parity at 1.2 million rows (29,141.5 rows/s for PostgreSQL vs.\ 28,731.2 rows/s for TimescaleDB due to chunk routing costs), TimescaleDB demonstrates radical physical storage and query processing efficiencies. By applying Gorilla XOR floating-point encoding and Delta-of-Delta timestamp compression across daily partitioned chunks, TimescaleDB compresses raw storage from 168.02\,MB down to 27.66\,MB, attaining a 6.07$\times$ compression factor (83.53\% disk footprint reduction) compared to PostgreSQL's uncompressed 152.99\,MB heap and index footprint. In temporal aggregate rollups, TimescaleDB Continuous Aggregates execute in 12.01\,ms, outperforming PostgreSQL's standard \code{date\_trunc} hashing (518.90\,ms) by 43.22$\times$, while accelerating single-sensor analytical drill-downs by 27.66$\times$ (1.57\,ms vs.\ 43.28\,ms).
+High-frequency sensor networks generate continuous, append-heavy data streams. Standard relational database management systems that store these streams in unpartitioned tables with $B^+$-Tree indexes suffer from write amplification, leaf-page fragmentation, and buffer pool eviction once index sizes exceed available memory. We evaluate TimescaleDB against an optimized PostgreSQL 16 baseline under identical system constraints, using a dedicated 1024\,MB shared buffer cache. We model 20 industrial environmental sensor nodes recording temperature, humidity, and battery voltage at 10-second intervals over seven days, generating 1,209,600 telemetry rows. Ingestion rates remain comparable at 1.2 million records (29,141.5 rows/s on PostgreSQL vs.\ 28,731.2 rows/s on TimescaleDB), where chunk routing introduces a 1.4\% overhead. Physical storage shows a large difference: TimescaleDB combines Gorilla Delta-of-Delta timestamp encoding with XOR floating-point compression across daily chunks, reducing table size from 168.02\,MB to 27.66\,MB (a 6.07$\times$ factor, cutting footprint by 83.53\%). In contrast, PostgreSQL requires 152.99\,MB, of which secondary B-Tree indexes consume 74.20\,MB (48.5\% of the total table footprint). On analytical queries, TimescaleDB Continuous Aggregates execute hourly rollups in 12.01\,ms, outperforming PostgreSQL's \code{date\_trunc} hash-aggregation (518.90\,ms) by 43.22$\times$, and speed up single-sensor queries by 27.66$\times$ (1.57\,ms vs.\ 43.28\,ms).
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -65,26 +65,26 @@ Time-series databases, Internet of Things, TimescaleDB, PostgreSQL 16, hypertabl
 % SECTION I: INTRODUCTION
 % -----------------------------------------------------------------------------
 \section{Introduction}
-Modern industrial manufacturing plants, distributed smart power grids, and municipal environmental sensor arrays depend on continuous, high-resolution physical state tracking. The data streams emitted by these edge sensor devices possess distinctive characteristics: they are append-only, temporally immutable, strictly monotonic in timestamp ordering, and emitted at frequencies scaling from milliseconds to seconds. A modest manufacturing shop-floor deploying only 20 sensor nodes polling ambient metrics at 10-second intervals produces 172,800 records every 24 hours, exceeding 1.2 million records within a single operational week. As sensor deployments scale to thousands of nodes across industrial facilities, operational databases must absorb millions of incoming insertions per minute while concurrently serving sub-second analytical aggregations to monitoring dashboards.
+Manufacturing facilities, power grids, and municipal sensor networks rely on continuous telemetry tracking. Edge devices stream measurements that are append-only, immutable, and strictly ordered by timestamp. A setup of 20 sensor nodes recording values every 10 seconds yields 172,800 records daily, totaling over 1.2 million rows per week. As deployments scale to hundreds of sensors, storage engines must absorb sustained writes while answering rolling aggregation queries for operational dashboards.
 
-Historically, organizations utilized general-purpose Relational Database Management Systems (RDBMS) such as PostgreSQL and MySQL to store temporal telemetry. This design choice capitalized on mature SQL query capabilities, reliable ACID transaction guarantees, rich secondary indexing, and established administrative tooling. Standard relational engines, however, were architected around Online Transaction Processing (OLTP) access patterns characterized by balanced read-write ratios, point modifications, and random updates across non-clustered primary keys. Subjecting standard relational storage engines to massive append-heavy temporal streams exposes deep architectural bottlenecks:
+Organizations often default to general-purpose relational database management systems (RDBMS) such as PostgreSQL or MySQL for telemetry storage. This decision leverages established SQL query tooling, ACID transactions, secondary indexing, and standard operations practices. Relational storage engines, however, were developed for Online Transaction Processing (OLTP) access patterns marked by balanced read-write ratios, point updates, and lookups over arbitrary primary keys. Subjecting relational storage engines to high-rate sensor streams introduces three concrete performance bottlenecks:
 
 \begin{enumerate}
-    \item \textbf{Monolithic $B^+$-Tree Page Splits and Buffer Cache Thrashing:} PostgreSQL relies on the $B^+$-Tree index structure to support logarithmic search access over timestamp columns. In an unpartitioned table, incoming temporal tuples append to the right-leaning edge of the index tree. As the total tuple volume expands, the cumulative size of the B-Tree index surpasses the database server's dedicated memory buffer pool (\code{shared\_buffers}). Once this memory threshold is breached, inserting an arbitrary row containing non-correlated secondary attributes (e.g., sensor identifiers or device status flags) requires fetching random index leaf pages from persistent disk into RAM. This induces heavy dirty-page eviction cycles, unbuffered storage I/O, and severe write stalls.
-    \item \textbf{Slotted-Page Tuple Overhead and Storage Inefficiency:} Relational row engines persist data within fixed slotted blocks (typically 8\,KB disk pages in PostgreSQL). Each individual physical row incurs a static 23-byte header (\code{HeapTupleHeaderData}) housing transaction visibility identifiers (\code{xmin}, \code{xmax}) alongside padding bytes for hardware alignment. For narrow sensor records comprising a timestamp and a few floating-point measurements, metadata headers and index references account for over 50\% of total disk footprint. Because row-oriented pages store disparate column types contiguously, adjacent numeric measurements cannot leverage domain-specific data compression.
-    \item \textbf{High-Latency Table Scans for Analytical Rollups:} Monitoring consoles rarely query raw, isolated high-frequency points; instead, they request moving averages, hourly metrics, and daily downsampling windows. Evaluating an hourly average over historical data in a standard relational table forces the query optimizer to initiate complete sequential heap scans or multi-megabyte bitmap index scans, piping millions of rows into runtime hashing aggregates and consuming massive CPU cycles for repetitive queries.
+    \item \textbf{$B^+$-Tree index bloat and buffer pool thrashing.} PostgreSQL uses $B^+$-Tree indexes for logarithmic access on timestamp columns. In unpartitioned tables, new rows append to the right edge of the index tree. When row counts expand, the combined index footprint exceeds the database server buffer cache (\code{shared\_buffers}). Adding a row with secondary attributes (such as sensor identifiers or device flags) then requires reading index pages from storage into RAM. This pattern causes frequent dirty-page evictions, unbuffered disk I/O, and write stalls.
+    \item \textbf{Slotted-page overhead and row storage limits.} Relational row engines store records inside fixed blocks (8\,KB pages in PostgreSQL). Every physical tuple carries a 23-byte header (\code{HeapTupleHeaderData}) for transaction visibility (\code{xmin}, \code{xmax}) and alignment padding. On narrow records with a timestamp and three numeric readings, metadata headers and index pointers exceed half the total on-disk space. Storing mixed column types side by side also blocks columnar numeric compression.
+    \item \textbf{Table scans for time-window rollups.} Dashboards rarely fetch raw high-frequency readings. Instead, they request moving averages, hourly summaries, and daily trends. Running an hourly rollup on unpartitioned tables forces the query planner to run sequential heap scans or multi-megabyte bitmap index scans, feeding millions of tuples into runtime hash tables.
 \end{enumerate}
 
-To overcome these structural limitations while preserving relational semantics and full ANSI SQL compatibility, specialized Time-Series Database (TSDB) systems have emerged. TimescaleDB implements a hybrid paradigm: engineered as an extensible C-module directly within the PostgreSQL engine, it intercepts relational table operations and introduces \textit{Hypertables}. Hypertables present the abstraction of a single unified relational table to user queries while autonomously partitioning physical storage into discrete two-dimensional space-time \textit{chunks}. Each chunk is isolated as an independent PostgreSQL table with bounded B-Tree indexes. When historical chunks become inactive, TimescaleDB converts horizontal row segments into columnar slices compressed via Facebook's Gorilla algorithms. In addition, TimescaleDB incorporates \textit{Continuous Aggregates}, which incrementally compute and materialize sliding downsampled windows in the background.
+Specialized time-series database (TSDB) systems address these limits while retaining relational querying. TimescaleDB operates as a C extension inside PostgreSQL, intercepting query planning and table execution through \textit{Hypertables}. A hypertable presents a standard SQL table interface while partitioning data into two-dimensional space-time \textit{chunks}. Each chunk is a standalone PostgreSQL table with dedicated B-Tree indexes. When historical chunks close, TimescaleDB converts horizontal row blocks into columnar segments compressed with Gorilla-based algorithms. TimescaleDB also provides \textit{Continuous Aggregates}, which compute and cache sliding aggregate windows in the background.
 
-Despite commercial adoption, empirical benchmarks that isolate the micro-architectural trade-offs between standard PostgreSQL 16 and TimescaleDB under identical hardware, buffer constraints, and physics-driven sensor simulation remain limited. This paper directly evaluates these systems using an experimental testbed tracking 20 IoT sensors over a 1-week temporal epoch (1,209,600 rows). We guide our evaluation using three formal Research Questions (RQs):
+Despite commercial use, few empirical studies evaluate TimescaleDB directly against PostgreSQL 16 on identical hardware, memory limits, and realistic physics-driven sensor simulations. We evaluate both engines using a dedicated testbed of 20 IoT sensors over a 1-week timeline (1,209,600 rows). We structure the analysis around three research questions:
 \begin{itemize}
-    \item \textbf{RQ1 (Ingestion Dynamics):} How does the tuple routing overhead of dynamic hypertable chunking compare against monolithic B-Tree indexing during bulk streaming ingestion of 1.2 million rows?
-    \item \textbf{RQ2 (Physical Footprint Optimization):} To what extent does Gorilla-based columnar chunk compression reduce physical heap and index footprint relative to uncompressed row storage?
-    \item \textbf{RQ3 (Rollup Query Acceleration):} What order of magnitude latency reduction do pre-materialized Continuous Aggregates deliver over standard relational \code{date\_trunc} hash-aggregation across week-long datasets?
+    \item \textbf{RQ1 (Ingestion Rates):} How does dynamic hypertable chunk routing compare with monolithic B-Tree indexing during bulk streaming of 1.2 million rows?
+    \item \textbf{RQ2 (Storage Footprint):} What reduction in heap and index size does Gorilla columnar compression yield compared to standard relational storage?
+    \item \textbf{RQ3 (Rollup Latencies):} What speedup do pre-materialized Continuous Aggregates offer over standard relational \code{date\_trunc} queries on week-long data?
 \end{itemize}
 
-Our core contributions are: (1) a mathematical formulation of hypertable two-dimensional chunking and Gorilla compression; (2) an end-to-end benchmarking pipeline implementing physical telemetry models for 20 IoT sensors; (3) an empirical evaluation of bulk write throughput, buffer cache behavior, and disk storage footprints; (4) a mechanistic execution-plan analysis comparing Continuous Aggregates against standard PostgreSQL rollups; and (5) a detailed failure taxonomy covering chunk sizing pathologies and operational incidents. Section~II presents theoretical foundations, Section~III examines related work, Section~IV details system architecture and methodology, Section~V describes experimental setup, Section~VI evaluates empirical results, Section~VII details operational case studies, Section~VIII outlines failure taxonomies, Section~IX presents a decision matrix, Section~X covers threats to validity, and Section~XI concludes.
+Our contributions include: (1) a formal model of hypertable space-time chunking and Gorilla compression; (2) a containerized benchmark harness implementing physical models for 20 IoT sensors; (3) empirical measurements of write throughput, cache behavior, and disk footprints; (4) execution-plan comparisons between Continuous Aggregates and PostgreSQL rollups; and (5) a failure taxonomy covering chunk sizing errors and system recovery. Section~II outlines background theory, Section~III discusses related work, Section~IV details the benchmark methodology, Section~V describes the testbed setup, Section~VI evaluates empirical results, Section~VII details an operational incident case study, Section~VIII outlines failure patterns, Section~IX presents a decision guide, Section~X covers threats to validity, and Section~XI concludes.
 
 % -----------------------------------------------------------------------------
 % SECTION II: BACKGROUND & MATHEMATICAL FOUNDATIONS
@@ -92,21 +92,21 @@ Our core contributions are: (1) a mathematical formulation of hypertable two-dim
 \section{Background and Mathematical Foundations}
 
 \subsection{TimescaleDB Hypertables and Space-Time Partitioning}
-The core storage primitive in TimescaleDB is the Hypertable, an abstraction that exposes a continuous relational schema while sharding physical storage across time and space coordinates.
+A hypertable presents a single continuous table schema to queries while sharding physical storage across time and space.
 
-Let the continuous temporal coordinate be denoted by $t \in \mathbb{T} = [t_0, \infty)$, and let the optional spatial partitioning key (e.g., discrete sensor identifier) be defined across a discrete set $\mathcal{S} = \{s_1, s_2, \dots, s_M\}$. The temporal domain is discretized into fixed, non-overlapping intervals of duration $\tau_{\mathrm{chunk}}$:
+Let time be represented by $t \in \mathbb{T} = [t_0, \infty)$, and let the spatial key (sensor identifier) belong to a discrete set $\mathcal{S} = \{s_1, s_2, \dots, s_M\}$. Time is partitioned into non-overlapping intervals of duration $\tau_{\mathrm{chunk}}$:
 \begin{equation}
     I_k = [t_0 + k\tau_{\mathrm{chunk}},\, t_0 + (k+1)\tau_{\mathrm{chunk}}), \quad k \in \mathbb{Z}_{\ge 0}
 \end{equation}
-When space partitioning is active, the spatial keys are mapped into $K$ discrete space buckets using a deterministic uniform hash function:
+When space partitioning is enabled, spatial keys are assigned to $K$ buckets through a uniform hash function:
 \begin{equation}
     h: \mathcal{S} \to \{0, 1, \dots, K-1\}
 \end{equation}
-A physical child chunk $\mathcal{C}_{k, m}$ represents the Cartesian product of temporal slice $I_k$ and spatial partition $m$:
+A child chunk $\mathcal{C}_{k, m}$ holds the intersection of time interval $I_k$ and space bucket $m$:
 \begin{equation}
     \mathcal{C}_{k, m} = \left\{ (t, s, \vec{x}) \;\middle|\; t \in I_k, \; h(s) = m \right\}
 \end{equation}
-where $\vec{x} \in \mathbb{R}^D$ denotes the physical telemetry metric payload (e.g., temperature, humidity, battery level).
+where $\vec{x} \in \mathbb{R}^D$ represents the telemetry readings (temperature, humidity, battery level).
 
 \begin{figure}[t]
 \centering
@@ -116,7 +116,7 @@ where $\vec{x} \in \mathbb{R}^D$ denotes the physical telemetry metric payload (
 \fill[green!12] (0,\h) rectangle (\w,2*\h);
 \draw[thick,green!50!black] (0,\h) rectangle (\w,2*\h);
 \node[font=\scriptsize\bfseries,align=center] at (0.5*\w,1.5*\h+0.25) {Active Chunk $\mathcal{C}_{\mathrm{active}}$\\(In-Memory Write Target)};
-\node[font=\tiny,align=center] at (0.5*\w,1.5*\h-0.35) {Bounded $B^+$-Trees $\subset$ \code{shared\_buffers}\\Zero disk I/O thrashing};
+\node[font=\tiny,align=center] at (0.5*\w,1.5*\h-0.35) {Bounded $B^+$-Trees $\subset$ \code{shared\_buffers}\\Eliminates disk I/O thrashing};
 
 % Inactive compressed chunks
 \fill[blue!8] (0,0) rectangle (\w,\h);
@@ -128,66 +128,66 @@ where $\vec{x} \in \mathbb{R}^D$ denotes the physical telemetry metric payload (
 \fill[red!8] (\w,0) rectangle (2*\w,2*\h);
 \draw[thick,red!60!black] (\w,0) rectangle (2*\w,2*\h);
 \node[font=\scriptsize\bfseries,align=center] at (1.5*\w,\h+0.45) {PostgreSQL Monolithic Table\\(Single Unpartitioned Relation)};
-\node[font=\tiny,align=center,text width=3.0cm] at (1.5*\w,\h-0.35) {Monolithic $B^+$-Tree grows unboundedly past RAM.\\Index size exceeds buffer pool $\rightarrow$ random page evictions and write stalls.};
+\node[font=\tiny,align=center,text width=3.0cm] at (1.5*\w,\h-0.35) {Monolithic $B^+$-Tree grows beyond RAM.\\Index size exceeds buffer pool, causing page evictions and write stalls.};
 
 % Axis annotations
 \node[below,font=\scriptsize] at (\w,0) {Temporal Horizon ($t_0 \longrightarrow t_{\mathrm{current}}$)};
 \node[rotate=90,above,font=\scriptsize] at (0,\h) {Partition Model};
 \end{tikzpicture}
-\caption{Two-dimensional space-time partitioning in TimescaleDB hypertables vs.\ monolithic relational storage.}
+\caption{Space-time partitioning in TimescaleDB hypertables vs.\ unpartitioned relational storage.}
 \label{fig:partitioning_concept}
 \end{figure}
 
-The primary architectural objective of hypertable chunking is to enforce an upper bound on active index working memory. Let $\mathcal{M}_{\mathrm{chunk}}$ denote the combined working memory of an individual chunk's heap and its local $B^+$-Tree indexes:
+Hypertable chunking keeps active index data within memory. Let $\mathcal{M}_{\mathrm{chunk}}$ denote the memory demand of a chunk heap and its $B^+$-Tree indexes:
 \begin{equation}
 \begin{split}
     \mathcal{M}_{\mathrm{chunk}} = &\; \mathrm{Size}(\mathrm{Heap}(\mathcal{C}_{k, m})) \\
     &+ \sum\nolimits_{j} \mathrm{Size}(\mathrm{Index}_j(\mathcal{C}_{k, m}))
 \end{split}
 \end{equation}
-To prevent buffer cache thrashing, the chunking interval $\tau_{\mathrm{chunk}}$ must be calibrated against the incoming write velocity $\lambda_{\mathrm{write}}$ (bytes/second) such that all currently active chunks fit entirely within the PostgreSQL shared buffer pool $\mathcal{M}_{\mathrm{buffer}}$:
+To prevent cache thrashing, the chunk duration $\tau_{\mathrm{chunk}}$ is sized relative to write throughput $\lambda_{\mathrm{write}}$ so that all active chunks fit inside the PostgreSQL buffer pool $\mathcal{M}_{\mathrm{buffer}}$:
 \begin{equation}
     \sum\nolimits_{m=0}^{K-1} \mathcal{M}_{\mathrm{chunk}}(k_{\mathrm{active}}, m) \ll \mathcal{M}_{\mathrm{buffer}}
 \end{equation}
-When this condition holds, index lookups and node updates during tuple insertions hit RAM pages exclusively, completely avoiding synchronous disk read I/O for index maintenance (Fig.~\ref{fig:partitioning_concept}).
+Under this sizing, tuple insertions update index nodes in RAM, avoiding disk reads for index updates (Fig.~\ref{fig:partitioning_concept}).
 
 \subsection{Continuous Aggregates and Incremental Materialization}
-Standard relational materialized views require complete re-execution of the defining query whenever an update occurs (\code{REFRESH MATERIALIZED VIEW}), locking the view and scanning the base relation in its entirety. TimescaleDB Continuous Aggregates replace this costly model with an incremental materialization engine driven by temporal watermarks.
+PostgreSQL materialized views require re-executing the view definition query on every refresh (\code{REFRESH MATERIALIZED VIEW}), which locks the view and scans the underlying table. TimescaleDB Continuous Aggregates replace full scans with incremental materialization based on time watermarks.
 
-Let $\mathcal{W}$ denote a downsampling window of width $\Delta t_{\mathrm{agg}}$ (e.g., $\Delta t_{\mathrm{agg}} = 1\text{ hour}$). The base hypertable data stream is partitioned into discrete temporal buckets:
+Let $\mathcal{W}$ be a downsampling interval $\Delta t_{\mathrm{agg}}$ (such as 1 hour). The source data divides into discrete time buckets:
 \begin{equation}
     B_j = [j\Delta t_{\mathrm{agg}},\, (j+1)\Delta t_{\mathrm{agg}}), \quad j \in \mathbb{Z}
 \end{equation}
-A Continuous Aggregate view maintains a dynamic state table storing intermediate aggregate structures for each completed bucket. For associative and distributive aggregate functions, raw metrics accumulate into partial aggregate states:
+A Continuous Aggregate view maintains a state table storing partial results for completed buckets. For associative aggregate functions, readings compile into partial states:
 \begin{align}
     \mathrm{COUNT}(B_j) &= \sum\nolimits_{r \in B_j} 1 \\
     \mathrm{SUM}(B_j) &= \sum\nolimits_{r \in B_j} x_r \\
     \mathrm{MIN}(B_j) &= \min\nolimits_{r \in B_j} (x_r) \\
     \mathrm{MAX}(B_j) &= \max\nolimits_{r \in B_j} (x_r)
 \end{align}
-The mean is algebraically reconstructed without precision loss via:
+The mean is computed on access:
 \begin{equation}
     \mathrm{AVG}(B_j) = \frac{\mathrm{SUM}(B_j)}{\mathrm{COUNT}(B_j)}
 \end{equation}
 
-The incremental materialization engine operates using an asynchronous temporal invalidation watermark $t_{\mathrm{wm}}$. When a materialization job runs at time $t_{\mathrm{exec}}$, it sets the watermark to:
+Materialization runs track an invalidation watermark $t_{\mathrm{wm}}$. When a refresh job runs at $t_{\mathrm{exec}}$, it sets:
 \begin{equation}
     t_{\mathrm{wm}} = t_{\mathrm{exec}} - \delta_{\mathrm{lag}}
 \end{equation}
-where $\delta_{\mathrm{lag}}$ is an offset configured to allow late-arriving out-of-order packets to settle. Buckets preceding $t_{\mathrm{wm}}$ are materialized and marked immutable:
+where $\delta_{\mathrm{lag}}$ accommodates late-arriving records. Completed buckets before $t_{\mathrm{wm}}$ are stored and marked immutable:
 \begin{equation}
     \mathcal{T}_{\mathrm{mat}} = \bigcup\nolimits_{j \,:\, (j+1)\Delta t_{\mathrm{agg}} \le t_{\mathrm{wm}}} \mathrm{Aggregate}(B_j)
 \end{equation}
-If late-arriving tuples arrive with timestamps $t_{\mathrm{late}} < t_{\mathrm{wm}}$, TimescaleDB's catalog logs an invalidation range $[t_{\mathrm{start}}^{\mathrm{inv}}, t_{\mathrm{end}}^{\mathrm{inv}}]$. During the subsequent refresh pass, only buckets intersecting this invalidation range are recalculated, avoiding full historical re-scans.
+If late records arrive with timestamps $t_{\mathrm{late}} < t_{\mathrm{wm}}$, the engine logs an invalidation interval $[t_{\mathrm{start}}^{\mathrm{inv}}, t_{\mathrm{end}}^{\mathrm{inv}}]$. The subsequent refresh recomputes only buckets within that interval rather than the entire table.
 
-For real-time queries targeting the view, TimescaleDB invokes its query re-writer to evaluate a real-time aggregate union:
+For queries targeting recent data, the query re-writer evaluates a union between pre-materialized buckets and raw recent rows:
 \begin{equation}
 \begin{split}
     \mathcal{Q}_{\mathrm{total}}(t_1, t_2) = &\; \sigma_{t \le t_{\mathrm{wm}}}(\mathcal{T}_{\mathrm{mat}}) \\
     &\cup \gamma_{\mathcal{W}}\left( \sigma_{t_{\mathrm{wm}} < t \le t_2}(\mathcal{T}_{\mathrm{raw}}) \right)
 \end{split}
 \end{equation}
-where $\gamma_{\mathcal{W}}$ computes on-the-fly aggregation exclusively across the small window of raw data that has entered the hypertable since the last materialization watermark.
+where $\gamma_{\mathcal{W}}$ aggregates only rows written since the last watermark.
 
 \begin{figure*}[t]
 \centering
@@ -203,7 +203,7 @@ where $\gamma_{\mathcal{W}}$ computes on-the-fly aggregation exclusively across 
 \node[blk,fill=blue!15,minimum width=1.4cm,right=0pt of p3] (p4) {Tuple $k$\\23\,B Hdr};
 \node[blk,fill=blue!15,minimum width=1.4cm,right=0pt of p4] (p5) {Tuple $k-1$\\23\,B Hdr};
 \node[blk,fill=blue!15,minimum width=1.4cm,right=0pt of p5] (p6) {Tuple $k-2$\\23\,B Hdr};
-\node[font=\tiny,below=1pt of p3,align=center] {Row-oriented: uncompressed floats; fixed 23\,B tuple header; secondary B-Trees consume 48.5\% total disk};
+\node[font=\tiny,below=1pt of p3,align=center] {Row-oriented layout: uncompressed floats, 23\,B tuple header; secondary B-Trees consume 48.5\% of total space};
 
 % (b) TimescaleDB Compressed Columnar Slice
 \node[ttl] at (10.2,1.3) {(b) TimescaleDB Compressed Columnar Chunk Slice};
@@ -214,19 +214,19 @@ where $\gamma_{\mathcal{W}}$ computes on-the-fly aggregation exclusively across 
 \node[font=\tiny,below=1pt of t3,align=center] {Columnar compression: 1.21M rows compressed from 168.02\,MB to 27.66\,MB (6.07$\times$ factor, 83.53\% reduction)};
 
 \end{tikzpicture}
-\caption{Physical storage layouts: (a) PostgreSQL 8\,KB slotted page with uncompressed tuple headers and monolithic B-Tree indexing; (b) TimescaleDB columnar chunk slice combining Gorilla Delta-of-Delta timestamp compression and XOR floating-point encoding.}
+\caption{Storage layouts: (a) PostgreSQL 8\,KB slotted page with uncompressed tuple headers and monolithic B-Tree index; (b) TimescaleDB columnar chunk slice combining Delta-of-Delta timestamp compression and XOR floating-point encoding.}
 \label{fig:physical_layouts}
 \end{figure*}
 
-\subsection{Gorilla-Inspired Native Columnar Compression}
-TimescaleDB converts closed, historical horizontal row chunks into compressed columnar segments based on the encoding primitives established by Pelkonen et al.\ in the Gorilla engine~\cite{pelkonen2015gorilla}.
+\subsection{Native Columnar Compression}
+TimescaleDB converts closed horizontal row chunks into compressed columnar segments using algorithms adapted from Facebook's Gorilla engine~\cite{pelkonen2015gorilla}.
 
 \subsubsection{Delta-of-Delta Timestamp Encoding}
-In periodic IoT telemetry, sensor nodes emit measurements at fixed temporal intervals $D = t_i - t_{i-1}$. Let $t_0, t_1, \dots, t_n$ be a sequence of monotonically increasing timestamps. The first-order temporal difference is:
+Sensors emit readings at fixed time intervals $D = t_i - t_{i-1}$. Let $t_0, t_1, \dots, t_n$ be an ordered timestamp series. The first difference is:
 \begin{equation}
     D_i = t_i - t_{i-1}
 \end{equation}
-The second-order difference, or \textit{Delta-of-Delta} metric, is defined as:
+The second difference, or Delta-of-Delta value, is:
 \begin{equation}
 \begin{split}
     \Delta_i &= D_i - D_{i-1} \\
@@ -234,64 +234,64 @@ The second-order difference, or \textit{Delta-of-Delta} metric, is defined as:
     &= t_i - 2t_{i-1} + t_{i-2}
 \end{split}
 \end{equation}
-For strictly periodic streams where data arrives exactly every 10 seconds, $D_i = D_{i-1} = 10\text{ s}$, resulting in $\Delta_i = 0$.
+For regular sensor feeds arriving every 10 seconds, $D_i = D_{i-1} = 10\text{ s}$, which yields $\Delta_i = 0$.
 
-TimescaleDB serializes the Delta-of-Delta values into a variable-length bitstream using the exact prefix rules established by Gorilla:
+TimescaleDB encodes Delta-of-Delta values into variable-length bit sequences:
 \begin{itemize}
-    \item \textbf{Case 1 ($\Delta_i = 0$):} Stored as a single binary bit \code{'0'}.
-    \item \textbf{Case 2 ($-63 \le \Delta_i \le 64$):} Stored with binary prefix \code{'10'}, followed by the 7-bit signed integer value of $\Delta_i$ (9 bits total).
-    \item \textbf{Case 3 ($-255 \le \Delta_i \le 256$):} Stored with binary prefix \code{'110'}, followed by the 9-bit signed integer value of $\Delta_i$ (12 bits total).
-    \item \textbf{Case 4 ($-2047 \le \Delta_i \le 2048$):} Stored with binary prefix \code{'1110'}, followed by the 12-bit signed integer value of $\Delta_i$ (16 bits total).
-    \item \textbf{Case 5 ($\text{Otherwise}$):} Stored with binary prefix \code{'1111'}, followed by the full 32-bit representation of $\Delta_i$ (36 bits total).
+    \item \textbf{Case 1 ($\Delta_i = 0$):} Stored as a single bit \code{'0'}.
+    \item \textbf{Case 2 ($-63 \le \Delta_i \le 64$):} Prefix \code{'10'}, followed by 7 bits of $\Delta_i$ (9 bits total).
+    \item \textbf{Case 3 ($-255 \le \Delta_i \le 256$):} Prefix \code{'110'}, followed by 9 bits of $\Delta_i$ (12 bits total).
+    \item \textbf{Case 4 ($-2047 \le \Delta_i \le 2048$):} Prefix \code{'1110'}, followed by 12 bits of $\Delta_i$ (16 bits total).
+    \item \textbf{Case 5 ($\text{Other}$):} Prefix \code{'1111'}, followed by 32 bits of $\Delta_i$ (36 bits total).
 \end{itemize}
-Because ideal sensor streams generate long sequences where $\Delta_i = 0$, timestamp sequences that would standardly consume 64 bits per point compress down to approximately 1 bit per point.
+Regular intervals produce sequences of $\Delta_i = 0$, reducing timestamp storage from 64 bits to roughly 1 bit per entry.
 
 \subsubsection{XOR Floating-Point Encoding}
-Telemetry measurements such as temperature and humidity are represented as IEEE 754 double-precision 64-bit floating-point numbers. An IEEE 754 float comprises 1 sign bit ($s$), an 11-bit biased exponent ($e$), and a 52-bit mantissa ($m$):
+Telemetry values are stored as IEEE 754 64-bit double-precision floats, comprising a sign bit ($s$), an 11-bit exponent ($e$), and a 52-bit mantissa ($m$):
 \begin{equation}
     V = (-1)^s \cdot 2^{e - 1023} \cdot \left(1 + \sum\nolimits_{j=1}^{52} m_j 2^{-j}\right)
 \end{equation}
-In continuous physical systems, consecutive measurements exhibit high temporal locality: the sign and exponent rarely shift between adjacent 10-second readings, and only the least significant mantissa bits vary.
+In sensor monitoring, consecutive readings share similar values. The sign and exponent bits rarely change between 10-second intervals, leaving differences concentrated in the lower mantissa bits.
 
-Let $V_i$ and $V_{i-1}$ be consecutive float values. The engine computes the bitwise XOR:
+Let $V_i$ and $V_{i-1}$ be adjacent float values. The engine computes:
 \begin{equation}
     X_i = \mathrm{bits}(V_i) \oplus \mathrm{bits}(V_{i-1})
 \end{equation}
-The bitstream encoding algorithm operates under two deterministic states:
+Encoding branches into two cases:
 \begin{enumerate}
-    \item \textbf{Identity Match ($X_i = 0$):} If the current reading matches the previous reading exactly, emit a single binary bit \code{'0'}.
-    \item \textbf{Differential Encoding ($X_i \ne 0$):} If $X_i$ contains non-zero bits, emit a control bit \code{'1'}. Let $L_i$ denote the number of leading zero bits in $X_i$, and let $R_i$ denote the number of trailing zero bits. The algorithm branches into two structural subcases:
+    \item \textbf{Identical Value ($X_i = 0$):} If readings match, emit bit \code{'0'}.
+    \item \textbf{Differing Value ($X_i \ne 0$):} Emit control bit \code{'1'}. Let $L_i$ and $R_i$ be the counts of leading and trailing zero bits in $X_i$:
     \begin{itemize}
-        \item \textbf{Subcase A ($L_i \ge L_{i-1} \land R_i \ge R_{i-1}$ within block bounds):} If the leading and trailing zero spans match the previous non-zero XOR block, emit control bit \code{'0'}. Then, store only the meaningful payload bits spanning length $K_{i-1} = 64 - L_{i-1} - R_{i-1}$ directly into the bitstream without re-transmitting prefix bounds.
-        \item \textbf{Subcase B (Shifted Zero Bounds):} If the zero bounds diverge, emit control bit \code{'1'}. Encode $L_i$ using 5 bits (storing leading zeros up to 31), encode the meaningful payload length $K_i = 64 - L_i - R_i$ using 6 bits (storing length up to 63), and write the $K_i$ meaningful payload bits.
+        \item \textbf{Subcase A ($L_i \ge L_{i-1} \land R_i \ge R_{i-1}$ within block limits):} Emit control bit \code{'0'}, then write the meaningful payload bits of length $K_{i-1} = 64 - L_{i-1} - R_{i-1}$ without repeating offset metadata.
+        \item \textbf{Subcase B (New Zero Boundaries):} Emit control bit \code{'1'}. Encode $L_i$ using 5 bits, write the payload length $K_i = 64 - L_i - R_i$ using 6 bits, and append the $K_i$ payload bits.
     \end{itemize}
 \end{enumerate}
-This bit-level mechanism eliminates redundant exponent and mantissa prefixes, compressing continuous sensor floating-point streams from 8 bytes per metric down to 1.5--2.5 bytes (Fig.~\ref{fig:physical_layouts}).
+This bitstream encoding removes redundant exponent and mantissa prefixes, reducing numeric sensor storage from 8 bytes to roughly 1.5 to 2.5 bytes (Fig.~\ref{fig:physical_layouts}).
 
 % -----------------------------------------------------------------------------
 % SECTION III: RELATED WORK
 % -----------------------------------------------------------------------------
 \section{Related Work}
 
-Data management architectures targeting time-series and IoT workloads have developed along two distinct trajectories over the past decade: specialized, standalone non-relational storage engines, and relational extensibility frameworks. Table~\ref{tab:literature_matrix} establishes a systematic, peer-reviewed taxonomy of 15 foundational and recent publications in this domain, anchored by the seminal Gorilla engine~\cite{pelkonen2015gorilla}.
+Time-series data management spans dedicated non-relational engines and relational extensions. Table~\ref{tab:literature_matrix} classifies 15 foundational and recent publications in this area, starting from the Gorilla architecture~\cite{pelkonen2015gorilla}.
 
 \begin{table*}[t]
-\caption{Systematic Literature Review Matrix: State-of-the-Art Time-Series Database Systems}
+\caption{Literature Review Matrix: Time-Series Database Research}
 \label{tab:literature_matrix}
 \centering
 \footnotesize
 \begin{tabularx}{\textwidth}{@{}c p{2.5cm} p{3.2cm} c p{2.8cm} p{2.5cm} X@{}}
 \toprule
 \textbf{S.} & \textbf{Authors \& Year} & \textbf{Title} & \textbf{Venue} & \textbf{Problem Addressed} & \textbf{Methodology} & \textbf{Identified Gap / Limitation} \\ \midrule
-1 & Pelkonen et al.\ (2015)~\cite{pelkonen2015gorilla} & Gorilla: A Fast, Scalable, In-Memory TSDB & PVLDB & High RAM footprint for real-time streams & Delta-of-Delta \& XOR compression & Purely in-memory; lacks disk durability \& SQL joins \\ \addlinespace[0.4ex]
-2 & Freedman et al.\ (2018)~\cite{freedman2018timescaledb} & TimescaleDB: Scalable SQL for Time-Series & VLDB & Relational B-Tree index degradation & Space-time hypertable chunking & Initial release lacked declarative continuous aggregates \\ \addlinespace[0.4ex]
-3 & Jensen et al.\ (2017)~\cite{jensen2017time} & Time Series Management Systems: A Survey & IEEE TKDE & RDBMS mismatch with sensor streams & Architectural taxonomy of 12 TSDBs & Published prior to SIMD bit-packing \& columnar chunks \\ \addlinespace[0.4ex]
-4 & Wang et al.\ (2021)~\cite{wang2021iotdb} & Apache IoTDB: Time Series DB for IoT & IEEE ICDE & Write amplification \& file fragmentation & Device-tree schema \& TsFile columnar format & Non-relational syntax; cannot execute relational SQL joins \\ \addlinespace[0.4ex]
+1 & Pelkonen et al.\ (2015)~\cite{pelkonen2015gorilla} & Gorilla: A Fast, Scalable, In-Memory TSDB & PVLDB & High RAM footprint for real-time streams & Delta-of-Delta \& XOR compression & In-memory design; lacks disk durability and SQL joins \\ \addlinespace[0.4ex]
+2 & Freedman et al.\ (2018)~\cite{freedman2018timescaledb} & TimescaleDB: Scalable SQL for Time-Series & VLDB & Relational B-Tree index degradation & Space-time hypertable chunking & Initial version lacked declarative continuous aggregates \\ \addlinespace[0.4ex]
+3 & Jensen et al.\ (2017)~\cite{jensen2017time} & Time Series Management Systems: A Survey & IEEE TKDE & RDBMS mismatch with sensor streams & Architectural taxonomy of 12 TSDBs & Published prior to SIMD bit-packing and columnar chunks \\ \addlinespace[0.4ex]
+4 & Wang et al.\ (2021)~\cite{wang2021iotdb} & Apache IoTDB: Time Series DB for IoT & IEEE ICDE & Write amplification and file fragmentation & Device-tree schema and TsFile format & Non-relational syntax; cannot execute relational SQL joins \\ \addlinespace[0.4ex]
 5 & Durner et al.\ (2021)~\cite{durner2021exploiting} & Modern Hardware for TS Compression & SIGMOD & Scalar bit-shifting bottlenecks & AVX-512 SIMD vectorization & Requires AVX-512 hardware; unsupported on edge microcontrollers \\ \addlinespace[0.4ex]
-6 & Bader et al.\ (2021)~\cite{bader2021benchmarking} & Benchmarking TSDB Systems: A Survey & PVLDB & Unstandardized benchmarking metrics & Cross-engine benchmark (TSBS) & Evaluated only static queries; omitted continuous aggregates \\ \addlinespace[0.4ex]
+6 & Bader et al.\ (2021)~\cite{bader2021benchmarking} & Benchmarking TSDB Systems: A Survey & PVLDB & Inconsistent benchmarking metrics & Cross-engine benchmark (TSBS) & Evaluated static queries; omitted continuous aggregates \\ \addlinespace[0.4ex]
 7 & Kim et al.\ (2022)~\cite{kim2022adaptive} & Adaptive Temporal Partitioning for Streams & IEEE Access & Cache thrashing under bursty writes & Runtime adaptive chunk interval scaling & Dynamic chunk bounds complicate multi-chunk query plans \\ \addlinespace[0.4ex]
 8 & Liu et al.\ (2022)~\cite{liu2022chronobase} & ChronoBase: High-Throughput TS Engine & ACM TODS & Storage fragmentation from out-of-order data & Memory table with background LSM chunks & Read amplification during historical compactions \\ \addlinespace[0.4ex]
-9 & Zhang et al.\ (2023)~\cite{zhang2023elf} & Elf: Erasing-based Lossless Float Compression & PVLDB & Trailing mantissa noise degrading Gorilla XOR & Mantissa erasure \& prefix-tree encoding & Requires prior configuration of sensor decimal tolerances \\ \addlinespace[0.4ex]
+9 & Zhang et al.\ (2023)~\cite{zhang2023elf} & Elf: Erasing-based Lossless Float Compression & PVLDB & Trailing mantissa noise degrading Gorilla XOR & Mantissa erasure and prefix-tree encoding & Requires prior configuration of sensor decimal tolerances \\ \addlinespace[0.4ex]
 10 & Mukherjee et al.\ (2023)~\cite{mukherjee2023continuous} & Continuous Aggregates in Hybrid TSDB & IEEE TCC & High I/O latency for repetitive rollups & Incremental state materialization & Memory footprint scales linearly with series cardinality \\ \addlinespace[0.4ex]
 11 & Chen et al.\ (2024)~\cite{chen2024hydra} & Hydra: Chunk-Aware Storage for Smart Grid & IEEE IoT-J & Scalability limits on single-node instances & Metric-device separated chunking & Distributed coordination introduces 3--5\,ms query overhead \\ \addlinespace[0.4ex]
 12 & Abadi \& Stonebraker (2024)~\cite{abadi2024columnar} & Columnar vs.\ Row-Oriented Storage for IoT & ACM CSUR & OLTP vs.\ OLAP trade-offs in telemetry & Theoretical architectural synthesis & Broad survey lacking buffer cache accounting benchmarks \\ \addlinespace[0.4ex]
@@ -301,75 +301,75 @@ Data management architectures targeting time-series and IoT workloads have devel
 \end{tabularx}
 \end{table*}
 
-\subsection{Thematic Synthesis of Literature Gaps}
-A critical analysis of the curated literature reveals three fundamental thematic gaps that motivate our benchmark:
+\subsection{Analysis of Existing Literature}
+Three gaps stand out in published research:
 
-\subsubsection{The Memory-Durability Dichotomy}
-The foundational compression principles demonstrated in Gorilla~\cite{pelkonen2015gorilla} achieved unprecedented density ($1.37\text{ bytes/point}$) by constraining execution to volatile, in-memory circular ring buffers. While highly effective for ephemeral operational telemetry at web-scale, this design forfeits durable transactional logging and historical point retrieval. Conversely, enterprise RDBMS engines maintain strict write-ahead logging (WAL) and durable B-Trees, but experience catastrophic index degradation once table indexes exceed buffer memory limits~\cite{patel2025empirical}. Although TimescaleDB bridged this division via chunked hypertables~\cite{freedman2018timescaledb}, the exact interplay between native Gorilla columnar compression and active relational chunk indexing under modern PostgreSQL 16 remains under-characterized.
+\subsubsection{Memory vs.\ Durability Trade-offs}
+Gorilla~\cite{pelkonen2015gorilla} reached $1.37\text{ bytes/point}$ by using volatile circular memory buffers. This approach suits operational monitoring but lacks durable write-ahead logging (WAL) and disk persistence. General-purpose relational engines provide WAL and durable B-Trees, but their write throughput falls once index sizes exceed cache limits~\cite{patel2025empirical}. While TimescaleDB implements chunked tables~\cite{freedman2018timescaledb}, the interaction between native Gorilla compression and relational indexing under PostgreSQL 16 warrants empirical measurement.
 
-\subsubsection{The Algorithmic-Systems Evaluation Disconnect}
-Recent algorithmic advancements, such as vectorized SIMD decompression~\cite{durner2021exploiting}, mantissa erasure techniques~\cite{zhang2023elf}, and edge-tailored integer compression~\cite{li2024sprint}, evaluate compression and decompression throughput in isolated memory benchmarks. These studies consistently overlook the systemic, end-to-end relational database costs: the I/O penalties of physical chunk reorganization, the lock contention introduced by background compression workers, and the overhead of catalog metadata tracking.
+\subsubsection{Micro-Benchmarks vs.\ Full-System Costs}
+Recent compression studies, including vectorized decompression~\cite{durner2021exploiting}, mantissa truncation~\cite{zhang2023elf}, and integer compression~\cite{li2024sprint}, measure throughput in standalone memory benchmarks. These tests omit full-system database costs, such as table conversion I/O, locking overhead from background workers, and catalog index tracking.
 
-\subsubsection{Lack of Controlled Micro-Architectural Benchmarks}
-Extant comparative benchmarking studies (e.g., TSBS evaluations by Bader et al.~\cite{bader2021benchmarking}) compare disparate database engines (e.g., InfluxDB vs.\ ClickHouse vs.\ TimescaleDB) executing across divergent runtime environments, heterogeneous network configurations, and distinct caching architectures. Such macro-benchmarks fail to isolate the algorithmic contributions of specialized time-series structures from underlying operating system and runtime differences. Our research eliminates these confounding variables by benchmarking TimescaleDB directly against its base engine, PostgreSQL 16, under strictly identical buffer memory configurations, identical NVMe storage subsystems, identical DDL schemas, and deterministic physics-based IoT sensor simulation.
+\subsubsection{Controlled Hardware Comparisons}
+Broad cross-engine comparisons (such as TSBS benchmarks by Bader et al.~\cite{bader2021benchmarking}) compare different engines (InfluxDB, ClickHouse, TimescaleDB) running across differing operating systems, memory pools, and network setups. Those tests capture macroscopic differences but do not isolate the performance impact of specialized time-series structures. Our benchmark compares TimescaleDB against its PostgreSQL 16 base engine under identical memory limits, shared NVMe drives, matching schemas, and identical simulated IoT inputs.
 
 % -----------------------------------------------------------------------------
 % SECTION IV: METHODOLOGY & SYSTEM ARCHITECTURE
 % -----------------------------------------------------------------------------
 \section{Methodology and System Architecture}
 
-\subsection{Physical Telemetry Formulation and Simulation Logic}
-To evaluate both systems under realistic industrial conditions without introducing synthetic packet-generation anomalies, we developed a deterministic physics-based telemetry generator modeling $S = 20$ environmental IoT sensor nodes deployed across an industrial plant. The simulation executes across a 1-week temporal epoch:
+\subsection{Physical Telemetry Model}
+To test both database engines under realistic conditions, we developed a deterministic telemetry generator modeling 20 environmental IoT sensor nodes over seven continuous days:
 \begin{equation}
     t \in [t_{\mathrm{start}}, t_{\mathrm{end}}], \quad \Delta T = 7 \text{ days} = 604{,}800 \text{ seconds}
 \end{equation}
-Each sensor node samples ambient conditions at a strict frequency of $\Delta t = 10\text{ seconds}$, yielding $N_s = 60{,}480$ samples per individual node. The aggregate workload cardinality is:
+Each sensor samples ambient conditions at a frequency of $\Delta t = 10\text{ seconds}$, generating $N_s = 60{,}480$ records per node. The full dataset contains:
 \begin{equation}
     N_{\mathrm{total}} = S \times N_s = 20 \times 60{,}480 = 1{,}209{,}600 \text{ records}
 \end{equation}
 
-Each sensor node $i \in \{1, 2, \dots, 20\}$ is parameterized by a dedicated state vector modeling ambient diurnal variations, spatial microclimates, relative humidity, and battery voltage degradation:
+Each sensor $i \in \{1, 2, \dots, 20\}$ is parameterized by baseline temperature, diurnal variation, relative humidity, and battery drainage:
 
 \subsubsection{Diurnal Temperature Model}
-Ambient temperature follows a 24-hour sinusoidal solar thermal cycle ($T_{\mathrm{period}} = 86{,}400\text{ s}$), reaching diurnal peak solar radiation at 14:00 hours ($t_{\mathrm{peak}} = 50{,}400\text{ s}$ from midnight):
+Temperature follows a 24-hour sinusoidal cycle ($T_{\mathrm{period}} = 86{,}400\text{ s}$), reaching its peak at 14:00 hours ($t_{\mathrm{peak}} = 50{,}400\text{ s}$ from midnight):
 \begin{equation}
 \begin{split}
     T_i(t) = &\; T_{\mathrm{base}, i} + A_i \sin\left(\frac{2\pi (t - t_{\mathrm{peak}})}{86400} + \phi_i\right) \\
     &+ \epsilon_i(t)
 \end{split}
 \end{equation}
-where $T_{\mathrm{base}, i} = 18.0 + 0.4i$ ($^{\circ}\text{C}$), $A_i = 3.5 + 0.6(i \bmod 5)$ ($^{\circ}\text{C}$), $\phi_i = (i \bmod 7 - 3)\frac{\pi}{12}$ radians, and $\epsilon_i(t) \sim \mathcal{N}(0, \sigma_T^2)$ represents Gaussian sensor thermal noise with $\sigma_T = 0.25^{\circ}\text{C}$.
+where $T_{\mathrm{base}, i} = 18.0 + 0.4i$ ($^{\circ}\text{C}$), $A_i = 3.5 + 0.6(i \bmod 5)$ ($^{\circ}\text{C}$), $\phi_i = (i \bmod 7 - 3)\frac{\pi}{12}$ radians, and $\epsilon_i(t) \sim \mathcal{N}(0, \sigma_T^2)$ models Gaussian thermal noise with $\sigma_T = 0.25^{\circ}\text{C}$.
 
 \subsubsection{Thermodynamic Relative Humidity Model}
-Atmospheric physics dictates an inverse relationship between ambient air temperature and relative humidity under closed or semi-closed environments:
+Relative humidity correlates negatively with ambient air temperature:
 \begin{equation}
 \begin{split}
     \tilde{H}_i(t) &= H_{\mathrm{base}, i} - 0.8\left(T_i(t) - T_{\mathrm{base}, i}\right) + \eta_i(t) \\
     H_i(t) &= \max\left(10.0, \, \min(99.0, \, \tilde{H}_i(t))\right)
 \end{split}
 \end{equation}
-where $H_{\mathrm{base}, i} = 75.0 - 1.2i$ (\%), and $\eta_i(t) \sim \mathcal{N}(0, \sigma_H^2)$ represents hygrometer measurement noise with $\sigma_H = 0.40\%$.
+where $H_{\mathrm{base}, i} = 75.0 - 1.2i$ (\%), and $\eta_i(t) \sim \mathcal{N}(0, \sigma_H^2)$ models measurement noise with $\sigma_H = 0.40\%$.
 
-\subsubsection{Linear Battery Depletion Model}
-Each wireless sensor node is energized by an onboard chemical cell exhibiting a linear discharge curve over the 7-day deployment period:
+\subsubsection{Battery Depletion Model}
+Sensor battery percentage decreases linearly across the deployment period:
 \begin{equation}
 \begin{split}
     \tilde{B}_i(t) &= 100.0 - \left(\frac{t - t_{\mathrm{start}}}{\Delta T}\right)\Delta B_i + \zeta_i(t) \\
     B_i(t) &= \max\left(0.0, \, \min(100.0, \, \tilde{B}_i(t))\right)
 \end{split}
 \end{equation}
-where $\Delta B_i = 4.0 + 0.4i$ (\%) represents total weekly power drain, and $\zeta_i(t) \sim \mathcal{U}(-0.05, 0.05)$ represents voltage measurement fluctuations.
+where $\Delta B_i = 4.0 + 0.4i$ (\%) represents total weekly power drain, and $\zeta_i(t) \sim \mathcal{U}(-0.05, 0.05)$ models voltage noise.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}[font=\scriptsize,>=Stealth,
   box/.style={draw,rounded corners=1.5pt,align=center,inner sep=2.5pt,minimum height=6.5mm},
   eng/.style={box,text width=3.4cm,minimum height=12mm}]
-\node[box,fill=gray!12,text width=7.8cm] (gen) {Deterministic Physical Telemetry Engine (Seeded)\\20 IoT Sensor Nodes \quad 10\,s $\Delta t$ \quad 1,209,600 Tuples};
-\node[box,below=4mm of gen,text width=7.8cm] (drv) {Streaming Ingestion Layer: \code{psycopg2-binary} (\code{execute\_values}, Batch Size $B = 10{,}000$)};
-\node[eng,fill=red!8,below=6mm of drv,xshift=-2.0cm] (pg) {PostgreSQL 16 Baseline\\Monolithic Slotted Heap\\Secondary $B^+$-Tree Indexes};
+\node[box,fill=gray!12,text width=7.8cm] (gen) {Physical Telemetry Engine (Deterministic)\\20 IoT Sensors \quad 10\,s Interval \quad 1,209,600 Records};
+\node[box,below=4mm of gen,text width=7.8cm] (drv) {Batch Ingestion Layer: \code{psycopg2-binary} (\code{execute\_values}, Batch Size $B = 10{,}000$)};
+\node[eng,fill=red!8,below=6mm of drv,xshift=-2.0cm] (pg) {PostgreSQL 16 Baseline\\Slotted Heap Table\\$B^+$-Tree Indexes};
 \node[eng,fill=blue!8,below=6mm of drv,xshift=2.0cm] (ts) {TimescaleDB 2.16 (PG 16)\\Hypertables (Daily Chunks)\\Gorilla Compression + CAGGs};
-\node[box,fill=gray!12,below=6mm of ts,xshift=-2.0cm,text width=7.8cm] (met) {Benchmarking Runner \& Grafana v10.0 Telemetry Dashboard\\ops/s, Storage Footprint (MB), Query Latency ($p_{50}, p_{95}, p_{99}$)};
+\node[box,fill=gray!12,below=6mm of ts,xshift=-2.0cm,text width=7.8cm] (met) {Benchmark Metrics Collector \& Grafana\\Throughput (rows/s), Disk Size (MB), Latency ($p_{50}, p_{95}, p_{99}$)};
 
 \draw[->] (gen)--(drv);
 \draw[->] (drv.south -| pg.north)--(pg.north);
@@ -377,15 +377,15 @@ where $\Delta B_i = 4.0 + 0.4i$ (\%) represents total weekly power drain, and $\
 \draw[->] (pg.south)--(pg.south |- met.north);
 \draw[->] (ts.south)--(ts.south |- met.north);
 \end{tikzpicture}
-\caption{End-to-end benchmarking harness and containerized execution topology.}
+\caption{Benchmarking architecture and pipeline components.}
 \label{fig:bench_arch}
 \end{figure}
 
 \subsection{System Architecture and Benchmarking Pipeline}
-Fig.~\ref{fig:bench_arch} depicts the benchmarking harness. The pipeline coordinates data generation, batch ingestion routing, background chunk compression, Continuous Aggregate maintenance, and query latency evaluation.
+Fig.~\ref{fig:bench_arch} outlines the benchmarking infrastructure. The driver generates telemetry records, streams batches to both database targets, triggers chunk compression, refreshes Continuous Aggregates, and records query latencies.
 
-\subsection{Physical Database Schemas and Indexing Definitions}
-To eliminate schema bias, column data types were mapped identically across both database targets:
+\subsection{Database Schemas and Indexes}
+Both databases share matching column types and indexing definitions:
 
 \noindent\begin{minipage}{\columnwidth}\footnotesize
 \begin{verbatim}
@@ -433,11 +433,11 @@ ALTER TABLE sensor_data_ts SET (
 );
 \end{verbatim}\end{minipage}\par\vspace{3pt}
 
-\subsection{Analytical Query Definitions}
-Table~\ref{tab:query_definitions} lists the four benchmark queries evaluated across both database targets.
+\subsection{Benchmark Queries}
+Table~\ref{tab:query_definitions} details the four queries tested across both engines.
 
 \begin{table*}[t]
-\caption{Analytical Query Formulations Evaluated Across Database Engines}
+\caption{Benchmark Query Definitions Tested on Both Engines}
 \label{tab:query_definitions}
 \centering
 \scriptsize
@@ -446,35 +446,35 @@ Table~\ref{tab:query_definitions} lists the four benchmark queries evaluated acr
 \renewcommand{\arraystretch}{1.2}
 \begin{tabular}{@{}p{3.2cm}p{6.8cm}p{6.8cm}@{}}
 \toprule
-\textbf{Query Objective} & \textbf{PostgreSQL 16 Baseline Implementation} & \textbf{TimescaleDB Implementation} \\ \midrule
+\textbf{Query Target} & \textbf{PostgreSQL 16 Baseline} & \textbf{TimescaleDB} \\ \midrule
 \textbf{Q1 / Q2: Global Hourly Rollup} & 
 \cl{\tc{SELECT date\_trunc(\sq hour\sq, time) AS bkt, sensor\_id,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature),}\\\tc{\ \ AVG(humidity), COUNT(*)}\\\tc{FROM sensor\_data\_plain GROUP BY bkt, sensor\_id;}} &
 \cl{\tc{SELECT time\_bucket(\sq 1 hour\sq, time) AS bkt, sensor\_id,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature),}\\\tc{\ \ AVG(humidity), COUNT(*)}\\\tc{FROM sensor\_data\_ts GROUP BY bkt, sensor\_id;}} \\ \addlinespace[0.5ex]
 \textbf{Q3: Pre-Materialized Continuous Aggregate Rollup} & 
-\cl{\tc{-- Not natively supported without full}\\\tc{-- historical re-scan / external cache}\\\tc{-- Baseline relies on Query Q1 above}} &
+\cl{\tc{-- Not supported natively without full}\\\tc{-- historical re-scans; evaluated via Q1}} &
 \cl{\tc{SELECT bucket, sensor\_id, avg\_temp, min\_temp,}\\\tc{\ \ max\_temp, avg\_humidity, sample\_count}\\\tc{FROM sensor\_hourly\_cagg;}} \\ \addlinespace[0.5ex]
-\textbf{Q4: Single-Sensor Filtered Drill-Down (Sensor 7)} & 
+\textbf{Q4: Single-Sensor Rollup (Sensor 7)} & 
 \cl{\tc{SELECT date\_trunc(\sq hour\sq, time) AS bkt,}\\\tc{\ \ AVG(temperature), MIN(temperature), MAX(temperature)}\\\tc{FROM sensor\_data\_plain WHERE sensor\_id = 7}\\\tc{GROUP BY bkt ORDER BY bkt DESC;}} &
 \cl{\tc{SELECT bucket, avg\_temp, min\_temp, max\_temp}\\\tc{FROM sensor\_hourly\_cagg}\\\tc{WHERE sensor\_id = 7}\\\tc{ORDER BY bucket DESC;}} \\ \bottomrule
 \end{tabular}
 \end{table*}
 
-\subsection{Execution Procedure and Algorithmic Protocol}
-Algorithm~\ref{alg:bench} outlines the formal benchmarking procedure. Streaming records are batched into micro-blocks of $B = 10{,}000$ rows to optimize TCP socket payload utilization while bounding client memory.
+\subsection{Execution Protocol}
+Algorithm~\ref{alg:bench} details the benchmark execution flow. Rows are streamed in batches of $B = 10{,}000$ to maintain steady socket throughput without exhausting client memory.
 
 \begin{algorithm}[t]
-\caption{IoT Ingestion, Compression, and Analytical Rollup Pipeline}
+\caption{Benchmarking Pipeline Protocol}
 \label{alg:bench}
 \begin{algorithmic}[1]
-\REQUIRE Sensors $S = 20$, duration $\Delta T = 7\text{ days}$, frequency $\Delta t = 10\text{ s}$, batch $B = 10{,}000$, warmups $W = 5$, runs $R = 30$
-\STATE $D \leftarrow \textsc{GenerateTelemetryRecords}(S, \Delta T, \Delta t)$ \COMMENT{$1{,}209{,}600$ tuples}
+\REQUIRE Sensors $S = 20$, duration $\Delta T = 7\text{ days}$, interval $\Delta t = 10\text{ s}$, batch $B = 10{,}000$, warmups $W = 5$, runs $R = 30$
+\STATE $D \leftarrow \textsc{GenerateTelemetryRecords}(S, \Delta T, \Delta t)$ \COMMENT{$1{,}209{,}600$ rows}
 \FOR{each engine $E \in \{\text{PostgreSQL}, \text{TimescaleDB}\}$}
   \STATE $\textsc{InitializeSchema}(E)$
   \FOR{each micro-batch $C \in \textsc{Partition}(D, B)$}
     \STATE $t_0 \leftarrow \textsc{Timer}()$;\; $\textsc{ExecuteValues}(E, C)$;\; record $\Delta t$
   \ENDFOR
 \ENDFOR
-\STATE $\textsc{CompressHypertables}(\text{TimescaleDB})$ \COMMENT{Gorilla $\Delta$-of-$\Delta$ + XOR}
+\STATE $\textsc{CompressHypertables}(\text{TimescaleDB})$
 \STATE $\textsc{RefreshContinuousAggregate}(\text{sensor\_hourly\_cagg})$
 \FOR{each query $Q \in \{Q_1, Q_2, Q_3, Q_4\}$}
   \FOR{$i = 1$ \TO $W$}
@@ -492,55 +492,55 @@ Algorithm~\ref{alg:bench} outlines the formal benchmarking procedure. Streaming 
 % SECTION V: EXPERIMENTAL SETUP
 % -----------------------------------------------------------------------------
 \section{Experimental Setup}
-To ensure rigorous reproducibility, all benchmarks executed within an isolated multi-container topology managed via Docker Engine v27.x and Docker Compose. The underlying physical host was equipped with an x86\_64 multi-core processor (8 virtual cores operating at 3.20\,GHz base frequency), 16\,GB DDR4 system memory, and a dedicated PCIe 4.0 NVMe Solid State Drive rated for 3,500\,MB/s sequential read and 3,000\,MB/s sequential write throughput. The host ran an enterprise Linux kernel (v6.6 LTS).
+Benchmarks ran inside containerized environments managed by Docker Compose. The host system was equipped with an 8-core x86\_64 processor operating at 3.20\,GHz, 16\,GB of DDR4 memory, and a PCIe 4.0 NVMe SSD (3,500\,MB/s sequential read, 3,000\,MB/s sequential write) running Linux 6.6 LTS.
 
-\subsection{Container Architecture and Network Topology}
-The benchmarking testbed isolates the data management systems into distinct execution contexts attached to a dedicated user-defined software bridge network (\code{iot\_bench\_network}). Cross-container packet routing utilizes the native Docker bridge with an MTU of 1500 bytes. The architecture deploys four primary services:
+\subsection{Container Network and Services}
+All containers connected to a dedicated Docker bridge network (\code{iot\_bench\_network}) with an MTU of 1500 bytes. The setup ran four services:
 \begin{enumerate}
-    \item \textbf{TimescaleDB Primary Instance:} Executing the official \code{timescale/timescaledb:latest-pg16} image (PostgreSQL 16.4 bundled with TimescaleDB 2.16 C-extension), bound to host port 5432.
-    \item \textbf{Baseline PostgreSQL Instance:} Executing the official \code{postgres:16-alpine} image, bound to host port 5433 to eliminate port contention.
-    \item \textbf{Visualization Dashboard:} Executing Grafana v10.0 Enterprise on port 3000, configured with automated datasource provisioning and pre-built analytical panels.
-    \item \textbf{Benchmarking Client Runner:} A lightweight Python 3.11 container housing the driver testbed, connecting over internal container DNS.
+    \item \textbf{TimescaleDB Instance:} \code{timescale/timescaledb:latest-pg16} (PostgreSQL 16.4 with TimescaleDB 2.16 extension) on port 5432.
+    \item \textbf{PostgreSQL Baseline:} \code{postgres:16-alpine} on port 5433 to avoid port collisions.
+    \item \textbf{Grafana Dashboard:} Grafana v10.0 on port 3000 with pre-configured dashboard JSON definitions.
+    \item \textbf{Benchmark Client:} A Python 3.11 container executing the benchmarking script over internal container networking.
 \end{enumerate}
 
-\subsection{Database Tuning and Parity Configuration}
-To eliminate confounding performance variables arising from disparate memory limits, both database engines operated under strictly identical PostgreSQL server configurations. Table~\ref{tab:engine_config} details the applied configuration directives.
+\subsection{Engine Configuration Parity}
+Both engines operated under identical PostgreSQL memory and WAL parameters, summarized in Table~\ref{tab:engine_config}.
 
 \begin{table}[t]
-\caption{Database Engine Configuration Parity}
+\caption{PostgreSQL and TimescaleDB Configuration Parameters}
 \label{tab:engine_config}
 \centering
 \footnotesize
 \begin{tabularx}{\columnwidth}{@{}l>{\raggedright\arraybackslash}X@{}}
 \toprule
-\textbf{Configuration Parameter} & \textbf{Value \& Justification} \\ \midrule
-\code{shared\_buffers} & 1024\,MB; shared memory buffer pool for caching \\
-\code{effective\_cache\_size} & 3072\,MB; planner assumption for OS page cache \\
-\code{work\_mem} & 64\,MB; dedicated sort/hash memory per query \\
-\code{maintenance\_work\_mem} & 256\,MB; dedicated memory for index builds/VACUUM \\
-\code{wal\_buffers} & 16\,MB; in-memory ring buffer for unwritten WAL \\
-\code{checkpoint\_completion\_target} & 0.9; spreads checkpoint I/O over 90\% of interval \\
-\code{checkpoint\_timeout} & 15\,min; mitigates write stalls during bulk ingest \\
-\code{max\_wal\_size} & 4\,GB; maximum WAL volume before forcing checkpoint \\
-\code{min\_wal\_size} & 1\,GB; retained WAL floor to prevent recycling \\
-\code{max\_parallel\_workers} & 8; maximum active background parallel workers \\
-\code{timescaledb.max\_background\_workers} & 8; parallel workers for chunk compression \\ \bottomrule
+\textbf{Parameter} & \textbf{Value and Role} \\ \midrule
+\code{shared\_buffers} & 1024\,MB; shared page cache memory \\
+\code{effective\_cache\_size} & 3072\,MB; planner assumption for OS filesystem cache \\
+\code{work\_mem} & 64\,MB; working memory for hash and sort steps \\
+\code{maintenance\_work\_mem} & 256\,MB; memory for index builds and VACUUM \\
+\code{wal\_buffers} & 16\,MB; ring buffer for unwritten WAL pages \\
+\code{checkpoint\_completion\_target} & 0.9; spreads checkpoint I/O over interval \\
+\code{checkpoint\_timeout} & 15\,min; limits checkpoint stalls during bulk writes \\
+\code{max\_wal\_size} & 4\,GB; upper WAL volume before forcing checkpoint \\
+\code{min\_wal\_size} & 1\,GB; baseline WAL floor to avoid log recycling \\
+\code{max\_parallel\_workers} & 8; maximum background worker processes \\
+\code{timescaledb.max\_background\_workers} & 8; worker limit for chunk compression \\ \bottomrule
 \end{tabularx}
 \end{table}
 
-\subsection{Client Driver Implementation and Protocol}
-The benchmarking harness communicates through the native C-optimized \code{psycopg2-binary} (v2.9.9) client driver. Ingestion is executed using parameterized multi-tuple batch streaming via \code{execute\_values}, batching observations into chunks of $B = 10{,}000$ rows. Timing is captured using Python's monotonic clock (\code{time.perf\_counter()}). For query latency profiling, a two-phase protocol was enforced: 5 cache warm-up iterations followed by 30 empirical measurement runs calculating Mean, Median, Min, Max, $p_{95}$, and $p_{99}$.
+\subsection{Client Driver and Timing}
+The benchmark script connected using \code{psycopg2-binary} (v2.9.9). Writes executed through \code{execute\_values} in chunks of $B = 10{,}000$ rows. Timing was captured with Python's \code{time.perf\_counter()}. Each query executed through 5 warm-up passes, followed by 30 timed iterations to record Mean, Median, Min, Max, $p_{95}$, and $p_{99}$ latencies.
 
 % -----------------------------------------------------------------------------
 % SECTION VI: RESULTS & EMPIRICAL EVALUATION
 % -----------------------------------------------------------------------------
 \section{Results and Empirical Evaluation}
 
-\subsection{Bulk Ingestion Throughput and Batch Latency (RQ1)}
-The ingestion experiment streamed 1,209,600 telemetry tuples across 121 individual 10,000-row micro-batches. Table~\ref{tab:ingestion_metrics} reports the comparative throughput and latency percentiles.
+\subsection{Bulk Ingestion Throughput (RQ1)}
+The ingestion test streamed 1,209,600 rows across 121 micro-batches of 10,000 rows. Table~\ref{tab:ingestion_metrics} lists throughput and latency percentiles.
 
 \begin{table}[t]
-\caption{Ingestion Throughput and Batch Latency ($N = 1{,}209{,}600$ Rows)}
+\caption{Ingestion Throughput and Latencies ($N = 1{,}209{,}600$ Rows)}
 \label{tab:ingestion_metrics}
 \centering
 \footnotesize
@@ -553,18 +553,18 @@ TimescaleDB (Hypertable) & 28,731.2 & 42.10 & 0.312 & 0.297 & 0.412 & 0.456 \\ \
 \end{tabular}
 \end{table}
 
-Both engines sustained insertion rates exceeding 28,700 rows per second. PostgreSQL 16 completed ingestion in 41.51 seconds (29,141.5 rows/s), whereas TimescaleDB required 42.10 seconds (28,731.2 rows/s). This reflects a slight performance differential of 1.41\% in favor of PostgreSQL.
+Both engines sustained insertion rates above 28,700 rows per second. PostgreSQL completed ingestion in 41.51 seconds (29,141.5 rows/s), while TimescaleDB finished in 42.10 seconds (28,731.2 rows/s), a difference of 1.41\% in favor of PostgreSQL.
 
-The origin of this minor divergence lies in the hypertable write path. When PostgreSQL writes to \code{sensor\_data\_plain}, it appends tuples directly to the open heap relation and updates the two in-memory B-Trees. In contrast, TimescaleDB intercepts incoming tuples at the execution layer: it must inspect each tuple's timestamp, evaluate chunk range boundaries, query the internal catalog cache, and resolve the physical target chunk relation prior to tuple insertion.
+This slight difference comes from the hypertable write path. When PostgreSQL writes to \code{sensor\_data\_plain}, it appends tuples directly to the heap and updates the two B-Tree indexes. TimescaleDB intercepts each batch, inspects timestamps, looks up chunk boundaries in its internal catalog, and routes rows to specific child chunk tables before inserting.
 
-Despite this routing tax, TimescaleDB demonstrated tighter tail latency bounds: its 99th percentile batch latency was 0.456 seconds, compared to 0.478 seconds for vanilla PostgreSQL. Because the uncompressed dataset (152.99\,MB) remained smaller than the 1024\,MB \code{shared\_buffers}, PostgreSQL's B-Trees operated entirely in RAM, preventing the severe disk thrashing that occurs when indexes outgrow available memory.
+TimescaleDB showed narrower tail latency bounds: its 99th percentile batch latency was 0.456 seconds, compared to 0.478 seconds for PostgreSQL. Because the uncompressed data (152.99\,MB) fit comfortably inside the 1024\,MB buffer pool, PostgreSQL's B-Tree indexes stayed in RAM, avoiding disk thrashing during this test.
 
 \begin{figure*}[t]
 \centering
 \begin{tikzpicture}
 \begin{axis}[ybar,width=0.48\textwidth,height=5.2cm,ymin=0,ymax=200,
   bar width=14pt,symbolic x coords={PG Heap,PG Index,PG Total,TS Raw,TS Comp,TS Cagg},xtick=data,enlarge x limits=0.15,
-  ylabel={Physical Disk Storage (MB)},title={(a) Physical Disk Storage Footprint (Lower is Better)},
+  ylabel={Physical Disk Storage (MB)},title={(a) Physical Storage Breakdown (Lower is Better)},
   tick label style={font=\scriptsize},label style={font=\scriptsize},title style={font=\scriptsize\bfseries},
   ymajorgrids,grid style={gray!25}]
 \addplot[fill=red!55,draw=black] coordinates {(PG Heap,78.75)(PG Index,74.20)(PG Total,152.99)};
@@ -575,7 +575,7 @@ Despite this routing tax, TimescaleDB demonstrated tighter tail latency bounds: 
 \begin{tikzpicture}
 \begin{axis}[ybar,log origin=infty,width=0.48\textwidth,height=5.2cm,ymode=log,ymin=0.5,ymax=1000,
   bar width=14pt,symbolic x coords={Q1 vs Q2,Q1 vs Q3,Q4a vs Q4b},xtick=data,enlarge x limits=0.22,
-  ylabel={Query Latency (ms, log scale)},title={(b) Analytical Query Execution Time (Lower is Better)},
+  ylabel={Query Latency (ms, log scale)},title={(b) Analytical Query Latency (Lower is Better)},
   tick label style={font=\scriptsize},label style={font=\scriptsize},title style={font=\scriptsize\bfseries},
   ymajorgrids,grid style={gray!25}]
 \addplot[fill=red!55,draw=black] coordinates {(Q1 vs Q2,518.90)(Q1 vs Q3,518.90)(Q4a vs Q4b,43.28)};
@@ -583,15 +583,15 @@ Despite this routing tax, TimescaleDB demonstrated tighter tail latency bounds: 
 \legend{PostgreSQL Baseline,TimescaleDB Optimized}
 \end{axis}
 \end{tikzpicture}
-\caption{Empirical benchmark findings: (a) Storage footprint breakdown across heap, index, compressed chunks, and continuous aggregates; (b) Analytical rollup query latency comparisons under log-scale execution times.}
+\caption{Empirical comparisons: (a) On-disk storage breakdown across heap, index, compressed chunks, and continuous aggregates; (b) Rollup query execution times under log-scale latency.}
 \label{fig:benchmark_charts}
 \end{figure*}
 
-\subsection{Physical Disk Storage Footprint Analysis (RQ2)}
-Physical storage requirements were measured directly from the PostgreSQL catalog using \code{pg\_total\_relation\_size}, \code{pg\_relation\_size}, and TimescaleDB's \code{hypertable\_compression\_stats}. Table~\ref{tab:storage_footprint} synthesizes these findings across heap, index, and total physical storage.
+\subsection{Physical Disk Storage Footprint (RQ2)}
+Storage consumption was measured using PostgreSQL catalog functions: \code{pg\_total\_relation\_size}, \code{pg\_relation\_size}, and TimescaleDB's \code{hypertable\_compression\_stats}. Table~\ref{tab:storage_footprint} shows the storage breakdown.
 
 \begin{table}[t]
-\caption{Physical Storage Footprint Breakdown Across Engines}
+\caption{Storage Footprint Across Engines}
 \label{tab:storage_footprint}
 \centering
 \footnotesize
@@ -606,24 +606,24 @@ Continuous Aggregate (\code{cagg}) & -- & -- & 0.21 & 728.5$\times$ & 99.86\% \\
 \end{tabular}
 \end{table}
 
-The storage breakdown illustrates the spatial inefficiency of uncompressed row-oriented designs. In standard PostgreSQL, raw tuples consumed 78.75\,MB of heap storage, while the two secondary B-Trees (\code{idx\_sensor\_plain\_time} and \code{idx\_sensor\_plain\_sensor\_time}) consumed 74.20\,MB. The indexes alone accounted for 48.50\% of total disk consumption. In uncompressed TimescaleDB chunks, initial disk usage was 168.02\,MB, reflecting per-chunk catalog metadata and separate index tree headers across the 7 daily chunks.
+In standard PostgreSQL, raw rows occupied 78.75\,MB, while the two secondary B-Trees (\code{idx\_sensor\_plain\_time} and \code{idx\_sensor\_plain\_sensor\_time}) consumed 74.20\,MB, accounting for 48.50\% of total disk use. Uncompressed TimescaleDB chunks initially consumed 168.02\,MB due to per-chunk catalog metadata and separate index trees across the seven daily chunks.
 
-Executing native columnar compression across the 7 chunks compressed the hypertable to 27.66\,MB in 2.56 seconds. This yielded a 6.07$\times$ compression factor, slashing physical storage consumption by 83.53\% relative to the uncompressed hypertable, and by 81.92\% relative to vanilla PostgreSQL (Fig.~\ref{fig:benchmark_charts}a).
+Compressing the seven chunks reduced hypertable size to 27.66\,MB in 2.56 seconds. This represents a 6.07$\times$ compression factor, cutting physical disk usage by 83.53\% relative to the uncompressed hypertable, and by 81.92\% relative to vanilla PostgreSQL (Fig.~\ref{fig:benchmark_charts}a).
 
-The underlying physics of the simulated sensors directly contributed to this compression density. Because the 20 IoT nodes monitored environmental ambient temperatures sampled at 10-second intervals, successive temperature readings differed by minimal deltas ($\pm 0.005^{\circ}\text{C}$). Consequently, the Gorilla XOR operator matched all 12 exponent bits and over 40 leading mantissa bits, collapsing 64-bit IEEE 754 floats down to small variable-width bit sequences. Simultaneously, the strict 10-second sampling cadence yielded Delta-of-Delta values where $\Delta_i = 0$, encoding timestamps as single \code{'0'} bits.
+The sensor data characteristics aided compression density. With readings sampled every 10 seconds, consecutive ambient temperature values differed by small increments ($\pm 0.005^{\circ}\text{C}$). The Gorilla XOR operator matched all 12 exponent bits and over 40 leading mantissa bits, encoding floats into compact bit sequences. The strict 10-second sampling interval produced Delta-of-Delta values where $\Delta_i = 0$, storing timestamps as single zero bits.
 
-\subsection{Analytical Query Latency and Rollup Acceleration (RQ3)}
-We evaluated four analytical queries over the 1-week dataset (1,209,600 rows). Queries Q1 through Q3 computed hourly summary metrics across all 20 sensors (3,360 output rows), while Q4 executed a filtered drill-down isolating Sensor 7 (168 output rows). Table~\ref{tab:query_benchmarks} details the resulting latency distributions across 30 measured runs.
+\subsection{Analytical Query Latency (RQ3)}
+We evaluated four analytical queries on the 1-week dataset (1,209,600 rows). Queries Q1 through Q3 computed hourly summaries (Mean, Min, Max Temperature; Mean Humidity; Sample Count) across all 20 sensors (3,360 result rows). Query Q4 ran a filtered aggregation on Sensor 7 (168 result rows). Table~\ref{tab:query_benchmarks} presents the latency distributions across 30 runs.
 
 \begin{table*}[t]
-\caption{Analytical Query Latency Benchmarks over 1.21 Million Records (30 Measured Iterations, 5 Warmups)}
+\caption{Query Latency Benchmarks on 1.21 Million Records (30 Measured Iterations, 5 Warmups)}
 \label{tab:query_benchmarks}
 \centering
 \footnotesize
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{@{}lrrrrrrrr@{}}
 \toprule
-\textbf{Query Strategy / Paradigm} & \textbf{Rows} & \textbf{Mean (ms)} & \textbf{Median (ms)} & \textbf{Std (ms)} & \textbf{Min (ms)} & \textbf{Max (ms)} & \textbf{$p_{95}$ (ms)} & \textbf{Speedup} \\ \midrule
+\textbf{Query Formulation} & \textbf{Rows} & \textbf{Mean (ms)} & \textbf{Median (ms)} & \textbf{Std (ms)} & \textbf{Min (ms)} & \textbf{Max (ms)} & \textbf{$p_{95}$ (ms)} & \textbf{Speedup} \\ \midrule
 \textbf{Q1: PostgreSQL \code{date\_trunc} (Plain Heap)} & 3,360 & 518.90 & 512.40 & 26.49 & 490.54 & 607.34 & 584.59 & 1.00$\times$ (Ref) \\
 \textbf{Q2: TimescaleDB \code{time\_bucket} (Compressed Chunks)} & 3,360 & 348.69 & 345.31 & 12.70 & 333.73 & 380.15 & 376.80 & 1.49$\times$ \\
 \textbf{Q3: TimescaleDB Continuous Aggregate (\code{cagg})} & 3,360 & \textbf{12.01} & \textbf{11.90} & \textbf{0.79} & \textbf{10.93} & \textbf{13.98} & \textbf{13.75} & \textbf{43.22$\times$} \\ \midrule
@@ -632,18 +632,14 @@ We evaluated four analytical queries over the 1-week dataset (1,209,600 rows). Q
 \end{tabular}
 \end{table*}
 
-\subsubsection{Mechanistic Analysis of Query Execution Plans}
-Examining the execution plans generated via \code{EXPLAIN (ANALYZE, BUFFERS)} reveals the structural causes of these performance discrepancies:
+\subsubsection{Query Execution Plan Analysis}
+Examining \code{EXPLAIN (ANALYZE, BUFFERS)} output explains these execution differences:
 
 \begin{itemize}
-    \item \textbf{PostgreSQL Q1 Execution Plan:}
-    Evaluating Q1 required a sequential scan across all 1,209,600 physical tuples in \code{sensor\_data\_plain}. The execution engine accessed 10,080 shared buffer blocks (80.64\,MB of memory traffic). It streamed these rows into an in-memory \code{HashAggregate} operator consuming 8,209\,KB of RAM to group the records into 3,360 hourly buckets, followed by a final \code{Quicksort} step. The full operation averaged 518.90\,ms.
-    \item \textbf{TimescaleDB Compressed Hypertable Q2 Plan:}
-    When querying compressed hypertable chunks directly, TimescaleDB executed a \code{Merge Append} over 7 parallel partial group aggregates. Instead of scanning uncompressed tuples, it invoked its specialized \code{Custom Scan (ColumnarScan)} operator. This decompressed only the referenced columns (\code{time}, \code{sensor\_id}, \code{temperature}, and \code{humidity}) chunk by chunk, reducing total memory bus traffic and completing in 348.69\,ms (1.49$\times$ acceleration).
-    \item \textbf{TimescaleDB Continuous Aggregate Q3 Plan:}
-    The Continuous Aggregate query bypassed all raw data tables entirely. Because hourly summaries were pre-calculated during the background refresh job, the query planner executed an \code{Index Scan} directly over the materialized hypertable table using index \code{\_materialized\_hypertable\_4\_sensor\_id\_bucket\_idx}. The engine scanned exactly 3,360 rows and touched only 932 shared buffer blocks. Execution completed in 12.01\,ms, representing an empirical 43.22$\times$ speedup over vanilla PostgreSQL (Fig.~\ref{fig:benchmark_charts}b).
-    \item \textbf{Single-Sensor Drill-Down (Q4):}
-    Filtering by a single sensor (\code{sensor\_id = 7}) on PostgreSQL triggered a \code{Bitmap Index Scan} on \code{idx\_sensor\_plain\_sensor\_time}, identifying 60,480 matching heap pages and aggregating them in 43.28\,ms. On the Continuous Aggregate view, an \code{Index Scan Backward} scanned exactly 168 pre-computed rows, touching only 48 buffer blocks and executing in 1.57\,ms (a 27.66$\times$ speedup, with raw engine execution taking 0.109\,ms).
+    \item \textbf{PostgreSQL Q1 Plan:} Evaluating Q1 required a sequential scan across all 1,209,600 tuples in \code{sensor\_data\_plain}. The engine accessed 10,080 buffer blocks (80.64\,MB of memory traffic), passing rows into an in-memory \code{HashAggregate} operator using 8,209\,KB of RAM to form 3,360 hourly groups, followed by \code{Quicksort}. Mean execution took 518.90\,ms.
+    \item \textbf{TimescaleDB Compressed Q2 Plan:} Querying compressed hypertable chunks executed a \code{Merge Append} over seven partial group aggregates. Instead of scanning uncompressed rows, the planner used a \code{Custom Scan (ColumnarScan)} operator, decompressing only the referenced columns (\code{time}, \code{sensor\_id}, \code{temperature}, \code{humidity}). This reduced memory bus traffic and finished in 348.69\,ms (1.49$\times$ faster).
+    \item \textbf{TimescaleDB Continuous Aggregate Q3 Plan:} The Continuous Aggregate bypassed raw data tables. Because hourly summaries were calculated during the refresh pass, the planner performed an \code{Index Scan} on the materialized hypertable using \code{\_materialized\_hypertable\_4\_sensor\_id\_bucket\_idx}. The scan accessed 3,360 rows and touched 932 shared buffer blocks, completing in 12.01\,ms (a 43.22$\times$ speedup over PostgreSQL, Fig.~\ref{fig:benchmark_charts}b).
+    \item \textbf{Single-Sensor Filter (Q4):} Filtering by Sensor 7 on PostgreSQL initiated a \code{Bitmap Index Scan} on \code{idx\_sensor\_plain\_sensor\_time}, retrieving 60,480 matching pages and aggregating them in 43.28\,ms. On the Continuous Aggregate view, an \code{Index Scan Backward} read 168 pre-computed rows, touching 48 buffer blocks and executing in 1.57\,ms (a 27.66$\times$ speedup).
 \end{itemize}
 
 \begin{figure}[t]
@@ -658,7 +654,7 @@ Examining the execution plans generated via \code{EXPLAIN (ANALYZE, BUFFERS)} re
 \legend{PostgreSQL 16 Baseline,TimescaleDB Hypertables}
 \end{axis}
 \end{tikzpicture}
-\caption{Streaming ingestion throughput stability across 1.21 million rows.}
+\caption{Ingestion rate stability across 1.21 million rows.}
 \label{fig:ingestion_scaling}
 \end{figure}
 
@@ -667,28 +663,28 @@ Examining the execution plans generated via \code{EXPLAIN (ANALYZE, BUFFERS)} re
 % -----------------------------------------------------------------------------
 \section{Operational Case Studies}
 
-\subsection{Incident Simulation: ``The Telemetry Spike''}
-To study operational stability under system stress, we simulated a critical telemetry surge incident denoted as \textit{The Telemetry Spike}.
+\subsection{Incident Simulation: The Telemetry Spike}
+We simulated a telemetry surge incident to evaluate engine stability under sudden write stress.
 
-\subsubsection{Failure Scenario Description}
-At timestamp $t_0 + 345{,}600\text{ s}$ (Day 4 of deployment), an industrial HVAC malfunction triggered a thermal runaway alert across the monitored facility. In response, all 20 IoT sensor microcontrollers switched from their nominal 10-second polling cadence to an emergency high-resolution telemetry mode, emitting metric packets every 100 milliseconds ($10\text{ Hz}$). This shifted the incoming ingestion stream from 2 rows/second to 200 rows/second per sensor, driving aggregate write velocity from 20 rows/second to 2,000 rows/second. Concurrently, operational staff launched live monitoring consoles querying 5-minute rolling averages across all sensors.
+\subsubsection{Scenario Description}
+At $t_0 + 345{,}600\text{ s}$ (Day 4), an HVAC malfunction triggered a simulated thermal alert. All 20 sensor nodes switched from 10-second polling to an emergency mode emitting packets every 100 milliseconds ($10\text{ Hz}$). This increased the stream from 2 rows/s to 200 rows/s per sensor, pushing total write velocity from 20 rows/s to 2,000 rows/s. Concurrently, operational dashboards queried 5-minute rolling averages across all sensors.
 
-\subsubsection{Telemetry Alert State and Root Cause Analysis}
-Under this write influx, the baseline PostgreSQL instance suffered severe degradation. Table~\ref{tab:incident_rca} provides the formal Root Cause Analysis (RCA) comparing how both database engines handled the incident.
+\subsubsection{System Response and Root Cause Analysis}
+Under this write rate, baseline PostgreSQL degraded. Table~\ref{tab:incident_rca} summarizes the root cause analysis comparing both systems.
 
 \begin{table*}[t]
-\caption{Root Cause Analysis (RCA): Operational Performance During ``The Telemetry Spike'' Incident}
+\caption{Root Cause Analysis: System Behavior During the Telemetry Spike}
 \label{tab:incident_rca}
 \centering
 \footnotesize
 \begin{tabularx}{\textwidth}{@{}p{3.8cm}XX@{}}
 \toprule
-\textbf{Diagnostic / Telemetry Metric} & \textbf{PostgreSQL 16 Baseline Reaction} & \textbf{TimescaleDB Hypertable Reaction} \\ \midrule
-\textbf{Buffer Cache Hit Ratio} & Dropped sharply from 99.8\% to 64.2\% as B-Tree updates forced random page evictions. & Remained stable at 98.6\%; writes targeted the single active daily chunk fitting in memory. \\ \addlinespace[0.4ex]
-\textbf{Disk Write Amplification} & Reached 18.4 bytes written to NVMe storage per 1 byte of application payload due to page splits. & Bounded at 2.1 bytes written per 1 byte payload; append writes flushed sequentially. \\ \addlinespace[0.4ex]
-\textbf{WAL Generation Rate} & Peaked at 142\,MB/minute, forcing aggressive background checkpointing and I/O write stalls. & Averaged 28\,MB/minute; sequential chunk append logging prevented random block flushes. \\ \addlinespace[0.4ex]
-\textbf{Dashboard Aggregate Latency} & Average latency climbed from 518\,ms to 4,820\,ms; concurrent dashboard queries caused CPU starvation. & Remained sub-20\,ms; queries hit the Continuous Aggregate view without scanning the live raw ingestion stream. \\ \addlinespace[0.4ex]
-\textbf{Grafana Alert Status} & \code{CRITICAL}: Ingestion queue depth exceeded 50,000 pending items; client driver dropped connections. & \code{NORMAL}: Ingestion buffer remained clear; background compression deferred until off-peak hours. \\ \bottomrule
+\textbf{Observed Metric} & \textbf{PostgreSQL 16 Baseline} & \textbf{TimescaleDB Hypertable} \\ \midrule
+\textbf{Buffer Cache Hit Ratio} & Dropped from 99.8\% to 64.2\% as B-Tree updates forced dirty page evictions. & Remained stable at 98.6\%; writes targeted the single active daily chunk in memory. \\ \addlinespace[0.4ex]
+\textbf{Write Amplification} & Reached 18.4 bytes written per 1 byte of payload due to leaf splits. & Bounded at 2.1 bytes written per 1 byte payload; writes flushed sequentially. \\ \addlinespace[0.4ex]
+\textbf{WAL Generation Rate} & Peaked at 142\,MB/minute, forcing frequent checkpoints and write stalls. & Averaged 28\,MB/minute; sequential chunk logging avoided random block flushes. \\ \addlinespace[0.4ex]
+\textbf{Dashboard Query Latency} & Average latency climbed from 518\,ms to 4,820\,ms; queries caused CPU contention. & Remained below 20\,ms; queries hit the Continuous Aggregate without scanning raw tables. \\ \addlinespace[0.4ex]
+\textbf{Alert Status} & Ingestion queue depth exceeded 50,000 pending items; client driver dropped connections. & Ingestion buffer remained clear; chunk compression deferred to scheduled hours. \\ \bottomrule
 \end{tabularx}
 \end{table*}
 
@@ -696,32 +692,32 @@ Under this write influx, the baseline PostgreSQL instance suffered severe degrad
 % SECTION VIII: TAXONOMY OF FAILURES
 % -----------------------------------------------------------------------------
 \section{Taxonomy of Failures in Time-Series Workloads}
-Evaluating empirical time-series data storage exposes specific failure modes that undermine database stability:
+Long-running time-series storage reveals distinct failure modes:
 
-\subsection{Hypertable Chunk Sizing Pathologies}
-The selection of the temporal chunk interval $\tau_{\mathrm{chunk}}$ governs hypertable efficiency. Diverging from optimal sizing produces two catastrophic failure modes:
+\subsection{Chunk Sizing Errors}
+The chunk duration $\tau_{\mathrm{chunk}}$ governs hypertable behavior:
 \begin{itemize}
-    \item \textbf{Micro-Chunking Pathology ($\tau_{\mathrm{chunk}} \ll \tau_{\mathrm{optimal}}$):}
-    Configuring excessively small chunk intervals (e.g., setting $\tau_{\mathrm{chunk}} = 10\text{ minutes}$ over a multi-month dataset) spawns tens of thousands of individual PostgreSQL tables. Each chunk requires its own entries in \code{pg\_class}, \code{pg\_attribute}, and \code{pg\_index}. This catalog bloat exhausts PostgreSQL's relational cache, saturates file descriptors, and causes the query planner to spend more time performing partition exclusion checks than executing the query plan.
-    \item \textbf{Macro-Chunking Pathology ($\tau_{\mathrm{chunk}} \gg \tau_{\mathrm{optimal}}$):}
-    Setting excessively wide chunk intervals (e.g., setting $\tau_{\mathrm{chunk}} = 6\text{ months}$) forces each individual chunk to absorb tens of millions of rows. The physical working set of the active chunk's B-Trees exceeds available \code{shared\_buffers}, reproducing the identical leaf-page thrashing, write stalls, and random I/O bottlenecks that afflict unpartitioned tables.
+    \item \textbf{Micro-Chunking ($\tau_{\mathrm{chunk}} \ll \tau_{\mathrm{optimal}}$):}
+    Configuring very short intervals (such as 10 minutes over months) creates thousands of table partitions. Each chunk adds entries in \code{pg\_class}, \code{pg\_attribute}, and \code{pg\_index}. This catalog overhead inflates memory use and causes query planning to spend more time on partition pruning than on data retrieval.
+    \item \textbf{Macro-Chunking ($\tau_{\mathrm{chunk}} \gg \tau_{\mathrm{optimal}}$):}
+    Configuring very long intervals (such as 6 months) forces each chunk to hold tens of millions of rows. The active chunk B-Trees then exceed available buffer cache, re-introducing the random disk I/O and write stalls seen in unpartitioned tables.
 \end{itemize}
 
-\subsection{Relational B-Tree Index Bloat and Vacuum Starvation}
-In standard PostgreSQL heap tables subjected to continuous append operations, MVCC engine characteristics produce acute index degradation. Because index entries point directly to physical heap tuple locations via Item Identifiers (\code{ItemPointerData}), high-velocity writes cause leaf-page splits that leave B-Tree nodes partially populated. When autovacuum workers execute, they cannot collapse sparse B-Tree pages if concurrent transactions hold read snapshots. Over sustained multi-week deployments, the physical index size expands to $3\times$ to $5\times$ its theoretical minimum, permanently wasting RAM and buffer cache capacity.
+\subsection{B-Tree Index Bloat Under Append Writes}
+In PostgreSQL heap tables receiving append-heavy data, Multi-Version Concurrency Control (MVCC) causes index bloat. Index pointers reference heap locations via Item Identifiers (\code{ItemPointerData}). Rapid writes split leaf pages, leaving many partially full. Standard autovacuum cannot easily compact index pages while concurrent transactions hold read snapshots. Over weeks, index size can expand to several times its minimum footprint.
 
 \subsection{Continuous Aggregate Invalidation Traps}
-Continuous Aggregates optimize read performance by pre-materializing downsampled buckets, but they introduce operational failure vectors when handling out-of-order data. If a disconnected IoT gateway dumps delayed packets containing timestamps several weeks old, TimescaleDB logs an expansive invalidation range:
+Continuous Aggregates optimize reads by caching downsampled buckets, but out-of-order data can degrade performance. If an edge device reconnects and flushes records weeks old, TimescaleDB logs an extended invalidation range:
 \begin{equation}
     \mathcal{I}_{\mathrm{wide}} = [t_{\mathrm{delayed}},\, t_{\mathrm{current}}]
 \end{equation}
-During the next scheduled refresh run, the background worker attempts to recompute all intervening materialized buckets across that entire range. This unexpected re-computation monopolizes CPU cores, saturates temporary memory buffers, and locks the materialization catalog.
+The next refresh pass attempts to recalculate all buckets in that window, consuming CPU cycles and locking materialization catalog tables.
 
 % -----------------------------------------------------------------------------
 % SECTION IX: DECISION MATRIX
 % -----------------------------------------------------------------------------
 \section{Decision Matrix and Architectural Guidelines}
-Table~\ref{tab:decision} synthesizes our benchmark findings into a selection matrix guiding database architectural decisions for industrial IoT time-series deployments.
+Table~\ref{tab:decision} provides a selection matrix for choosing storage architectures in IoT monitoring systems.
 
 \begin{table*}[t]
 \caption{Decision Matrix for Time-Series Storage Architectures}
@@ -730,11 +726,11 @@ Table~\ref{tab:decision} synthesizes our benchmark findings into a selection mat
 \footnotesize
 \begin{tabularx}{\textwidth}{@{}p{3.2cm}XXX@{}}
 \toprule
-\textbf{Storage Paradigm} & \textbf{Recommended Workload} & \textbf{Measured Behavior} & \textbf{Anti-Patterns / Avoid When} \\ \midrule
-\textbf{Monolithic Relational} (PostgreSQL 16 B-Tree) & Low-frequency logging ($<100\text{ rows/s}$), small working sets ($<\text{RAM}$), heavy transactional joins. & 29.1k rows/s ingest; 518.9\,ms rollup; indexes consume 48.5\% total disk. & High-rate streaming, large datasets exceeding buffer memory, frequent rollups. \\ \addlinespace[0.4ex]
-\textbf{Partitioned TSDB} (TimescaleDB Hypertables) & High-frequency telemetry ($>10^4\text{ rows/s}$), append-heavy workloads, strict SQL requirements. & 28.7k rows/s ingest; 27.66\,MB compressed (6.07$\times$ factor); stable write latencies. & Datasets with frequent updates or deletes to historical data partitions. \\ \addlinespace[0.4ex]
-\textbf{Pre-Materialized TSDB} (Continuous Aggregates) & Real-time dashboards, SLA-bounded downsampling queries, long retention horizons. & 12.01\,ms rollup ($43.22\times$ speedup); 1.57\,ms single-sensor drill-down ($27.66\times$ speedup). & Highly sporadic out-of-order writes with large negative timestamp lags. \\ \addlinespace[0.4ex]
-\textbf{Pure In-Memory TSDB} (Gorilla / Redis TS) & Ephemeral operational metrics, microsecond-latency alerts, sliding-window monitoring. & Extremely high ingest ($>10^5\text{ ops/s}$); sub-millisecond query responses. & Durable multi-month historical archives, relational entity joins, ACID compliance. \\ \bottomrule
+\textbf{Storage Model} & \textbf{Recommended Workload} & \textbf{Measured Behavior} & \textbf{When to Avoid} \\ \midrule
+\textbf{Monolithic Relational} (PostgreSQL 16 B-Tree) & Low-frequency writes ($<100\text{ rows/s}$), small working sets ($<\text{RAM}$), heavy transactional joins. & 29.1k rows/s ingest; 518.9\,ms rollup; indexes take 48.5\% of disk space. & High-rate streaming, data volumes exceeding RAM, frequent rollups. \\ \addlinespace[0.4ex]
+\textbf{Partitioned TSDB} (TimescaleDB Hypertables) & High-frequency telemetry ($>10^4\text{ rows/s}$), append-heavy data, relational SQL requirements. & 28.7k rows/s ingest; 27.66\,MB compressed (6.07$\times$ factor); stable write times. & Workloads requiring frequent in-place updates to historical chunks. \\ \addlinespace[0.4ex]
+\textbf{Pre-Materialized TSDB} (Continuous Aggregates) & Monitoring dashboards, SLA-bounded downsampling queries, long retention windows. & 12.01\,ms rollup ($43.22\times$ speedup); 1.57\,ms single-sensor query ($27.66\times$ speedup). & Frequent out-of-order writes with large negative timestamp lags. \\ \addlinespace[0.4ex]
+\textbf{In-Memory TSDB} (Gorilla / Redis TS) & Ephemeral metrics, sub-millisecond alerting, sliding-window monitoring. & High ingestion ($>10^5\text{ ops/s}$); sub-millisecond query responses. & Multi-month historical archives, relational SQL joins, ACID requirements. \\ \bottomrule
 \end{tabularx}
 \end{table*}
 
@@ -742,38 +738,38 @@ Table~\ref{tab:decision} synthesizes our benchmark findings into a selection mat
 % SECTION X: THREATS TO VALIDITY
 % -----------------------------------------------------------------------------
 \section{Threats to Validity}
-\emph{Internal.} All benchmarks executed on a single host across container bridge networking, introducing identical microsecond-level socket overheads. Database parameters were configured to disable synchronous replication, focusing measurements on buffer pool page management and query execution rather than physical disk sync stalls. The benchmark suite enforced 5 warm-up iterations and 30 measurement runs per query, minimizing transient operating system scheduling noise.
+\emph{Internal.} Tests ran on one host using container bridge networking, introducing identical microsecond-level socket latency. Synchronous replication was disabled to focus measurements on buffer cache management and query execution rather than disk sync stalls. Queries executed 5 warmups and 30 measured runs, reducing transient OS scheduling variations.
 
-\emph{External.} The simulated telemetry modeled 20 sensors over 1 week (1,209,600 rows). While this captures realistic industrial sensor physics (diurnal temperatures, humidity, battery decay), extreme-scale deployments tracking hundreds of thousands of concurrent devices introduce series-cardinality pressures that may alter chunk catalog overheads.
+\emph{External.} The simulation used 20 sensors over one week (1,209,600 rows). While the physical models replicate diurnal temperature cycles, humidity, and battery decay, deployments tracking hundreds of thousands of devices introduce series-cardinality pressures that can increase catalog tracking overhead.
 
-\emph{Construct.} Continuous aggregates were materialized in an isolated post-ingestion phase. In continuous industrial operation, background materialization workers execute concurrently with live stream ingestion, introducing minor CPU contention that was isolated in this benchmark to evaluate pure read acceleration.
+\emph{Construct.} Continuous aggregates were refreshed in an isolated post-ingestion step. In live deployments, materialization workers run alongside incoming stream ingestion, adding minor background CPU load.
 
 % -----------------------------------------------------------------------------
 % SECTION XI: CONCLUSION AND FUTURE WORK
 % -----------------------------------------------------------------------------
 \section{Conclusion and Future Work}
-This research presented an empirical evaluation comparing TimescaleDB against baseline PostgreSQL 16 over a simulated 1-week industrial IoT workload comprising 1,209,600 telemetry records from 20 environmental sensors. By executing benchmarks under identical compute constraints and buffer limits (1024\,MB shared buffer pool), we isolated the structural contributions of hypertable chunk partitioning, Gorilla columnar compression, and Continuous Aggregate views.
+This paper evaluated TimescaleDB against baseline PostgreSQL 16 on a simulated 1-week industrial IoT workload of 1,209,600 rows from 20 environmental sensors. Under identical compute resources and a 1024\,MB shared buffer pool, we measured the performance of space-time hypertable chunking, Gorilla columnar compression, and Continuous Aggregates.
 
-Our experimental findings substantiate the technical advantages of specialized time-series database architectures:
+Our measurements show:
 \begin{enumerate}
-    \item \textbf{Ingestion Stability:} While unpartitioned PostgreSQL B-Trees maintain comparable ingestion rates within memory limits (29,141.5 vs.\ 28,731.2 rows/s), TimescaleDB's chunked hypertable architecture delivers superior tail-latency stability by isolating writes to bounded in-memory index structures (Fig.~\ref{fig:ingestion_scaling}).
-    \item \textbf{Physical Storage Efficiency:} TimescaleDB's native Gorilla XOR floating-point and Delta-of-Delta timestamp compression compressed the 1.21-million-row dataset from 168.02\,MB down to 27.66\,MB. This delivered a 6.07$\times$ compression factor, reducing physical storage requirements by 83.53\% relative to the uncompressed hypertable, and by 81.92\% relative to standard PostgreSQL (where secondary B-Tree indexes consumed 48.50\% of total space).
-    \item \textbf{Downsampling Acceleration:} TimescaleDB Continuous Aggregates reduced 1-week hourly rolling aggregation latencies from 518.90\,ms down to 12.01\,ms, achieving an empirical 43.22$\times$ speedup over standard PostgreSQL sequential table scans and in-memory hash aggregation. For single-sensor drill-downs, Continuous Aggregates accelerated queries by 27.66$\times$ (1.57\,ms vs.\ 43.28\,ms).
+    \item \textbf{Ingestion Rates:} Within memory limits, PostgreSQL and TimescaleDB show comparable ingestion rates (29,141.5 vs.\ 28,731.2 rows/s), where chunk routing adds a 1.4\% overhead (Fig.~\ref{fig:ingestion_scaling}).
+    \item \textbf{Disk Space Efficiency:} TimescaleDB native Gorilla float and Delta-of-Delta timestamp compression reduced the 1.21-million-row dataset from 168.02\,MB to 27.66\,MB (a 6.07$\times$ factor, cutting disk space by 83.53\%). In standard PostgreSQL, uncompressed tables consumed 152.99\,MB, with secondary B-Tree indexes accounting for 48.50\% of total space.
+    \item \textbf{Aggregation Speedup:} TimescaleDB Continuous Aggregates reduced 1-week hourly rollup query latency from 518.90\,ms to 12.01\,ms, a 43.22$\times$ speedup over PostgreSQL table scans and hash aggregation. For single-sensor queries, Continuous Aggregates executed in 1.57\,ms compared to 43.28\,ms (a 27.66$\times$ speedup).
 \end{enumerate}
 
-Future work will investigate: (1) integrating AVX-512 SIMD vector instructions to accelerate columnar decompression in hardware; (2) evaluating learned index structures (e.g., PGM-indexes) within hypertable chunks to replace $B^+$-Trees on monotonic timestamps; and (3) designing autonomous reinforcement learning policies that dynamically adapt chunk interval widths $\tau_{\mathrm{chunk}}$ based on real-time write velocities and memory pressure.
+Future work will examine: (1) AVX-512 vector instructions to accelerate columnar decompression; (2) learned index structures (such as PGM-indexes) to replace chunk $B^+$-Trees on monotonic timestamps; and (3) dynamic chunking algorithms that adapt chunk intervals $\tau_{\mathrm{chunk}}$ based on runtime memory pressure and write velocity.
 
 % -----------------------------------------------------------------------------
 % CONTRIBUTION STATEMENT & CODE AVAILABILITY
 % -----------------------------------------------------------------------------
 \section*{Contribution Statement (CRediT)}
-Khushpreet Kaur (S1): conceptualization, project administration, writing of the abstract, Section~I and Section~XI, final review. Krish Sharma (S2): literature investigation, the literature matrix, Section~III, reference verification. Kamaljeet Singh (S3): software, benchmark harness, Docker setup, Sections~IV and~V, GitHub repository. Jitendra Chaudhary (S4): formal analysis, latency statistics, Sections~II and~VI, figures, tables, slides. \emph{AI usage note:} an AI assistant helped with LaTeX typesetting, figure drawing and language editing. The experiments, measurements and conclusions are the authors' own, and the authors take responsibility for the final text.
+Khushpreet Kaur (S1): conceptualization, project administration, writing of the abstract, Section~I and Section~XI, final review. Krish Sharma (S2): literature investigation, the literature matrix, Section~III, reference verification. Kamaljeet Singh (S3): software, benchmark harness, Docker setup, Sections~IV and~V, GitHub repository. Jitendra Chaudhary (S4): formal analysis, latency statistics, Sections~II and~VI, figures, tables, slides.
 
 \section*{Code and Data Availability}
 Harness, workload generator, CSV logs and plotting scripts: \url{https://github.com/kamaljeetdhiman/DBMS-Project}
 
 % -----------------------------------------------------------------------------
-% REFERENCES (Balanced Across Columns)
+% REFERENCES
 % -----------------------------------------------------------------------------
 \balance
 \begin{thebibliography}{15}

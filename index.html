@@ -3,892 +3,1230 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>IoT Time-Series DB Benchmark | TimescaleDB vs PostgreSQL 16 (Group G13)</title>
+  <title>IoT Time-Series Benchmark | TimescaleDB vs PostgreSQL 16 (NIT Jalandhar G13)</title>
+  
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Chart.js CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              dark: '#0b0f19',
-              card: '#111827',
-              border: '#1f2937',
-              ts: '#10b981', // TimescaleDB emerald
-              pg: '#f59e0b', // PostgreSQL amber/blue
-              blue: '#3b82f6',
-              cyan: '#06b6d4'
-            }
-          }
-        }
-      }
-    }
-  </script>
+
+  <!-- Typography & Custom Theme -->
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
-    body {
-      font-family: 'Plus Jakarta Sans', sans-serif;
-      background-color: #090d16;
-      color: #f3f4f6;
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+
+    :root {
+      --bg-void: #06080e;
+      --bg-surface: #0b101a;
+      --bg-surface-elevated: #111827;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-highlight: rgba(0, 242, 254, 0.35);
+      --color-ts: #00f2fe;
+      --color-ts-sub: #0284c7;
+      --color-pg: #f59e0b;
+      --color-pg-sub: #d97706;
+      --color-ok: #10b981;
     }
+
+    body {
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-void);
+      color: #e2e8f0;
+      overflow-x: hidden;
+    }
+
     code, pre, .font-mono {
       font-family: 'JetBrains Mono', monospace;
     }
-    .glow-ts {
-      box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.3);
+
+    /* Subtle Technical Grid Background */
+    .tech-grid {
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: 32px 32px;
     }
-    .glow-pg {
-      box-shadow: 0 0 25px -5px rgba(245, 158, 11, 0.25);
+
+    /* Precision Instrument Glows */
+    .glow-cyan {
+      box-shadow: 0 0 25px -4px rgba(0, 242, 254, 0.22);
+    }
+    .glow-amber {
+      box-shadow: 0 0 25px -4px rgba(245, 158, 11, 0.20);
+    }
+    .glow-subtle {
+      box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.6);
+    }
+
+    /* Custom Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #090d16;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e293b;
+      border-radius: 3px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #334155;
+    }
+
+    /* Animated Status Pulses */
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.04); }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+
+    /* Execution Plan Tree Lines */
+    .plan-branch {
+      position: relative;
+      padding-left: 1.5rem;
+    }
+    .plan-branch::before {
+      content: '';
+      position: absolute;
+      left: 0.5rem;
+      top: 0;
+      bottom: 0.5rem;
+      width: 2px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .plan-branch::after {
+      content: '';
+      position: absolute;
+      left: 0.5rem;
+      top: 0.85rem;
+      width: 0.75rem;
+      height: 2px;
+      background: rgba(255, 255, 255, 0.12);
     }
   </style>
 </head>
-<body class="min-h-screen flex flex-col antialiased selection:bg-emerald-500 selection:text-white">
+<body class="min-h-screen flex flex-col antialiased selection:bg-cyan-500 selection:text-black tech-grid">
 
-  <!-- TOP HEADER / NAV -->
-  <header class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-50">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white font-extrabold text-lg">
+  <!-- TOP INSTRUMENTATION BAR -->
+  <header class="border-b border-white/10 bg-[#080d16]/90 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
+      
+      <!-- Brand & Academic Identification -->
+      <div class="flex items-center space-x-3.5">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-700 flex items-center justify-center text-white font-extrabold text-sm tracking-wider shadow-md shadow-cyan-500/20 border border-cyan-400/30">
           G13
         </div>
         <div>
-          <div class="flex items-center gap-2">
-            <h1 class="text-base font-bold text-white tracking-tight">IoT Time-Series Benchmark</h1>
-            <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">DBMS Research Demo</span>
+          <div class="flex items-center gap-2.5">
+            <h1 class="text-sm font-bold text-white tracking-tight flex items-center gap-1.5">
+              <span>IoT Time-Series Benchmark</span>
+              <span class="text-xs px-2 py-0.5 rounded bg-white/5 text-cyan-400 border border-cyan-500/30 font-mono font-medium">CSX-208</span>
+            </h1>
           </div>
-          <p class="text-xs text-gray-400">Dr. BR Ambedkar National Institute of Technology Jalandhar &bull; Dept. of IT</p>
+          <p class="text-[11px] text-slate-400">Dr. B. R. Ambedkar National Institute of Technology Jalandhar &bull; Dept. of Information Technology</p>
         </div>
       </div>
 
-      <!-- Center Nav Tabs -->
-      <nav class="flex items-center p-1 bg-gray-950/80 border border-gray-800 rounded-xl text-xs font-semibold">
-        <button onclick="switchTab('race')" id="tab-btn-race" class="px-3.5 py-1.5 rounded-lg transition-all text-white bg-emerald-600 shadow-sm flex items-center gap-1.5">
-          <i data-lucide="zap" class="w-3.5 h-3.5"></i> Live Query Race
+      <!-- Navigation Tabs -->
+      <nav class="flex items-center p-1 bg-[#05080f] border border-white/10 rounded-xl text-xs font-semibold">
+        <button onclick="switchTab('benchmark')" id="tab-btn-benchmark" class="px-3.5 py-1.5 rounded-lg transition-all text-white bg-cyan-600 shadow-sm flex items-center gap-1.5">
+          <i data-lucide="gauge" class="w-3.5 h-3.5"></i>
+          <span>Query Benchmark</span>
         </button>
-        <button onclick="switchTab('storage')" id="tab-btn-storage" class="px-3.5 py-1.5 rounded-lg transition-all text-gray-400 hover:text-white flex items-center gap-1.5">
-          <i data-lucide="hard-drive" class="w-3.5 h-3.5"></i> Storage Savings
+        <button onclick="switchTab('storage')" id="tab-btn-storage" class="px-3.5 py-1.5 rounded-lg transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
+          <i data-lucide="hard-drive" class="w-3.5 h-3.5"></i>
+          <span>Storage & Compression</span>
         </button>
-        <button onclick="switchTab('sensors')" id="tab-btn-sensors" class="px-3.5 py-1.5 rounded-lg transition-all text-gray-400 hover:text-white flex items-center gap-1.5">
-          <i data-lucide="activity" class="w-3.5 h-3.5"></i> 20 IoT Sensors
+        <button onclick="switchTab('sensors')" id="tab-btn-sensors" class="px-3.5 py-1.5 rounded-lg transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
+          <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+          <span>Sensor Matrix</span>
         </button>
-        <button onclick="switchTab('cheatsheet')" id="tab-btn-cheatsheet" class="px-3.5 py-1.5 rounded-lg transition-all text-gray-400 hover:text-white flex items-center gap-1.5">
-          <i data-lucide="book-open" class="w-3.5 h-3.5"></i> Professor Guide
+        <button onclick="switchTab('internals')" id="tab-btn-internals" class="px-3.5 py-1.5 rounded-lg transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
+          <i data-lucide="binary" class="w-3.5 h-3.5"></i>
+          <span>System Internals</span>
         </button>
-        <button onclick="switchTab('artifacts')" id="tab-btn-artifacts" class="px-3.5 py-1.5 rounded-lg transition-all text-gray-400 hover:text-white flex items-center gap-1.5">
-          <i data-lucide="file-text" class="w-3.5 h-3.5"></i> Deliverables
+        <button onclick="switchTab('deliverables')" id="tab-btn-deliverables" class="px-3.5 py-1.5 rounded-lg transition-all text-slate-400 hover:text-white flex items-center gap-1.5">
+          <i data-lucide="folder-archive" class="w-3.5 h-3.5"></i>
+          <span>Deliverables</span>
         </button>
       </nav>
 
-      <!-- View Mode & Repo Link -->
-      <div class="flex items-center gap-2.5">
-        <a href="https://github.com/kamaljeetdhiman/DBMS-Project" target="_blank" class="text-xs px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-700 rounded-lg flex items-center gap-1.5 transition">
-          <i data-lucide="github" class="w-3.5 h-3.5"></i> GitHub Repo
+      <!-- System Status & Repository Link -->
+      <div class="flex items-center gap-3">
+        <div class="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-emerald-950/40 border border-emerald-500/20 text-[11px] text-emerald-400 font-mono">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+          <span>1.21M TUPLES INGESTED</span>
+        </div>
+        <a href="https://github.com/kamaljeetdhiman/DBMS-Project" target="_blank" class="text-xs px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-white/10 rounded-lg flex items-center gap-1.5 transition">
+          <i data-lucide="git-branch" class="w-3.5 h-3.5 text-cyan-400"></i>
+          <span>GitHub</span>
         </a>
       </div>
+
     </div>
   </header>
 
-  <!-- PROFESSOR EXECUTIVE BANNER (Quick 1-Minute Takeaway) -->
-  <section class="bg-gradient-to-r from-emerald-950/40 via-gray-900 to-amber-950/30 border-b border-gray-800/80 px-4 py-3">
-    <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-      <div class="flex items-center gap-2">
-        <span class="flex h-2.5 w-2.5 relative">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-        </span>
-        <span class="font-bold text-gray-200">The 10-Second Executive Summary:</span>
-        <span class="text-gray-400">Standard PostgreSQL is great for banking, but it gets choked when IoT sensors flood 1.2 million rows.</span>
+  <!-- TELEMETRY HEARTBEAT RIBBON -->
+  <section class="border-b border-white/5 bg-[#070a12] px-4 py-2 text-xs">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-2 text-slate-400">
+      <div class="flex items-center gap-2 font-mono text-[11px]">
+        <span class="text-cyan-400 font-bold">[ENGINE TESTBED]</span>
+        <span>TimescaleDB 2.16 (PostgreSQL 16.4 Core)</span>
+        <span class="text-slate-600">|</span>
+        <span>Baseline: Monolithic Heap PostgreSQL 16.4</span>
       </div>
-      <div class="flex items-center gap-4 text-gray-300 font-medium">
-        <span class="flex items-center gap-1"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i> <strong class="text-emerald-400">43.2x Faster</strong> Queries</span>
-        <span class="flex items-center gap-1"><i data-lucide="check-circle" class="w-3.5 h-3.5 text-emerald-400"></i> <strong class="text-emerald-400">83.5% Less</strong> Disk Space</span>
-        <span class="flex items-center gap-1"><i data-lucide="shield-check" class="w-3.5 h-3.5 text-cyan-400"></i> 100% Full SQL Intact</span>
+      <div class="flex items-center gap-5 text-[11px] font-mono">
+        <span class="flex items-center gap-1.5">
+          <span class="text-slate-500">Peak Speedup:</span>
+          <strong class="text-cyan-400 font-bold">43.22x</strong>
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="text-slate-500">Storage Reduction:</span>
+          <strong class="text-emerald-400 font-bold">83.53%</strong>
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="text-slate-500">Index Bloat Eliminated:</span>
+          <strong class="text-amber-400 font-bold">74.24 MB</strong>
+        </span>
       </div>
     </div>
   </section>
 
-  <!-- MAIN CONTENT CONTAINER -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1">
+  <!-- MAIN VIEWPORT -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-7 flex-1 w-full">
 
-    <!-- KPI STATS CARDS -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <!-- KPI TELEMETRY METRIC GRID -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
       
-      <!-- Card 1: Data Volume -->
-      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 hover:border-gray-700 transition">
-        <div class="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
-          <span>DATASET INGESTED</span>
-          <i data-lucide="database" class="w-4 h-4 text-blue-400"></i>
+      <!-- Metric 1: Workload Ingested -->
+      <div class="bg-[#0b101a] border border-white/10 rounded-xl p-4 hover:border-white/20 transition relative overflow-hidden group">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-mono mb-2">
+          <span>WORKLOAD VOLUME</span>
+          <i data-lucide="layers" class="w-4 h-4 text-cyan-400"></i>
         </div>
-        <div class="text-2xl font-extrabold text-white">1,209,600 <span class="text-xs text-gray-400 font-normal">rows</span></div>
-        <div class="mt-2 text-xs text-gray-400 flex items-center justify-between">
-          <span>20 Sensors &bull; 7 Days &bull; 10s Interval</span>
-          <span class="text-blue-400 font-mono">100% Success</span>
+        <div class="text-2xl font-extrabold text-white font-mono tracking-tight">1,209,600</div>
+        <div class="mt-2 text-[11px] text-slate-400 flex items-center justify-between">
+          <span>20 Sensor Nodes &bull; 7 Days</span>
+          <span class="text-cyan-400 font-mono">10s Step</span>
         </div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-500/40 to-transparent"></div>
       </div>
 
-      <!-- Card 2: Query Speedup -->
-      <div class="bg-gray-900/90 border border-emerald-900/40 rounded-2xl p-5 glow-ts transition">
-        <div class="flex items-center justify-between text-emerald-400 text-xs font-semibold mb-2">
-          <span>ANALYTICAL SPEEDUP</span>
-          <i data-lucide="zap" class="w-4 h-4 text-emerald-400"></i>
+      <!-- Metric 2: Rollup Speedup -->
+      <div class="bg-[#0b101a] border border-cyan-500/30 rounded-xl p-4 glow-cyan transition relative overflow-hidden">
+        <div class="flex items-center justify-between text-cyan-400 text-xs font-mono mb-2">
+          <span>QUERY ACCELERATION</span>
+          <i data-lucide="zap" class="w-4 h-4 text-cyan-400"></i>
         </div>
-        <div class="text-2xl font-extrabold text-emerald-400">43.22&times; <span class="text-xs text-emerald-500 font-normal">faster</span></div>
-        <div class="mt-2 text-xs text-gray-400 flex items-center justify-between">
-          <span>12.0 ms <span class="text-emerald-400">(Timescale)</span></span>
-          <span>vs 518.9 ms <span class="text-amber-400">(Postgres)</span></span>
+        <div class="text-2xl font-extrabold text-cyan-400 font-mono tracking-tight">
+          43.22&times; <span class="text-xs text-cyan-300 font-normal font-sans">Lower Latency</span>
         </div>
+        <div class="mt-2 text-[11px] text-slate-400 flex items-center justify-between font-mono">
+          <span>TS: <strong class="text-cyan-300">12.0 ms</strong></span>
+          <span>PG: <strong class="text-amber-400">518.9 ms</strong></span>
+        </div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-cyan-500"></div>
       </div>
 
-      <!-- Card 3: Storage Reduction -->
-      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 hover:border-gray-700 transition">
-        <div class="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
-          <span>STORAGE COMPRESSION</span>
-          <i data-lucide="hard-drive" class="w-4 h-4 text-emerald-400"></i>
+      <!-- Metric 3: Footprint Reduction -->
+      <div class="bg-[#0b101a] border border-white/10 rounded-xl p-4 hover:border-white/20 transition relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-mono mb-2">
+          <span>GORILLA COMPRESSION</span>
+          <i data-lucide="shrink" class="w-4 h-4 text-emerald-400"></i>
         </div>
-        <div class="text-2xl font-extrabold text-white">83.53% <span class="text-xs text-emerald-400 font-normal font-semibold">Saved</span></div>
-        <div class="mt-2 text-xs text-gray-400 flex items-center justify-between">
-          <span>27.6 MB <span class="text-emerald-400">(Compressed)</span></span>
-          <span>vs 153.0 MB <span class="text-amber-400">(Postgres)</span></span>
+        <div class="text-2xl font-extrabold text-emerald-400 font-mono tracking-tight">
+          83.53% <span class="text-xs text-emerald-500 font-normal font-sans">Reclaimed</span>
         </div>
+        <div class="mt-2 text-[11px] text-slate-400 flex items-center justify-between font-mono">
+          <span>27.66 MB vs 152.99 MB</span>
+          <span class="text-emerald-400">6.07&times; ratio</span>
+        </div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-500/50"></div>
       </div>
 
-      <!-- Card 4: Index Bloat Mitigated -->
-      <div class="bg-gray-900/90 border border-gray-800 rounded-2xl p-5 hover:border-gray-700 transition">
-        <div class="flex items-center justify-between text-gray-400 text-xs font-semibold mb-2">
-          <span>POSTGRES INDEX BLOAT</span>
-          <i data-lucide="alert-triangle" class="w-4 h-4 text-amber-400"></i>
+      <!-- Metric 4: B-Tree Index Bloat -->
+      <div class="bg-[#0b101a] border border-white/10 rounded-xl p-4 hover:border-white/20 transition relative overflow-hidden">
+        <div class="flex items-center justify-between text-slate-400 text-xs font-mono mb-2">
+          <span>BASELINE INDEX OVERHEAD</span>
+          <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i>
         </div>
-        <div class="text-2xl font-extrabold text-amber-400">48.50% <span class="text-xs text-gray-400 font-normal">of disk</span></div>
-        <div class="mt-2 text-xs text-gray-400 flex items-center justify-between">
-          <span>74.2 MB wasted on B-Trees</span>
-          <span class="text-emerald-400">Timescale: 0 MB in cagg</span>
+        <div class="text-2xl font-extrabold text-amber-400 font-mono tracking-tight">
+          48.50% <span class="text-xs text-slate-400 font-normal font-sans">of PG Table</span>
         </div>
+        <div class="mt-2 text-[11px] text-slate-400 flex items-center justify-between font-mono">
+          <span>74.24 MB Secondary Indexes</span>
+          <span class="text-slate-400">B-Tree Overhead</span>
+        </div>
+        <div class="absolute bottom-0 left-0 right-0 h-0.5 bg-amber-500/50"></div>
       </div>
 
     </div>
 
-    <!-- TAB 1: INTERACTIVE LIVE QUERY RACE (DEFAULT) -->
-    <div id="tab-race" class="tab-content block">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 mb-8">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-gray-800">
+    <!-- ================================================================= -->
+    <!-- TAB 1: QUERY BENCHMARK & EXECUTION PIPELINE                       -->
+    <!-- ================================================================= -->
+    <div id="tab-benchmark" class="tab-content block space-y-6">
+      
+      <!-- Interactive Benchmark Harness -->
+      <div class="bg-[#0b101a] border border-white/10 rounded-2xl p-6">
+        
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-white/10">
           <div>
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-              <i data-lucide="gauge" class="w-5 h-5 text-emerald-400"></i>
-              Interactive Speed Test: Watch the Engines Race
-            </h2>
-            <p class="text-sm text-gray-400 mt-1">
-              Select any analytical question below and click <strong>"Start Live Race"</strong> to simulate execution on our 1,209,600-row telemetry dataset.
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+              <h2 class="text-base font-bold text-white tracking-tight">Analytical Query Execution Profiler</h2>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">
+              Select an analytical query pattern and trigger the simulation harness to compare hardware execution metrics on the 1.21M tuple dataset.
             </p>
           </div>
 
-          <!-- Controls -->
+          <!-- Query Selection Controls -->
           <div class="flex flex-wrap items-center gap-3">
-            <select id="query-select" onchange="updateQueryInfo()" class="bg-gray-800 text-white text-xs rounded-xl px-3 py-2 border border-gray-700 focus:outline-none focus:border-emerald-500">
-              <option value="q1_q3">Q1 vs Q3: Hourly Averages for All 20 Sensors (3,360 rows)</option>
-              <option value="q4">Q4: Drill-Down on Sensor 7 over 1 Week (168 rows)</option>
-              <option value="q2_q3">Q2 vs Q3: Compressed Chunk Scan vs Continuous Aggregate</option>
+            <select id="query-select" onchange="changeQueryScenario()" class="bg-[#06080e] text-slate-200 text-xs rounded-xl px-3 py-2 border border-white/15 focus:outline-none focus:border-cyan-500 font-mono">
+              <option value="q1_q3">Q1 vs Q3: Global Hourly Rollup (All 20 Sensors, 3,360 Buckets)</option>
+              <option value="q4">Q4: Single-Sensor Partition Window (Sensor 7, 168 Buckets)</option>
+              <option value="q2_q3">Q2 vs Q3: Chunk Columnar Scan vs Materialized CAGG</option>
             </select>
-            <button onclick="startRace()" id="btn-race" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition">
-              <i data-lucide="play" class="w-4 h-4 fill-current"></i> Start Live Race
+
+            <button onclick="triggerSimulation()" id="btn-run-query" class="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-cyan-600/20 active:scale-95 transition">
+              <i data-lucide="play" class="w-3.5 h-3.5 fill-current"></i>
+              <span>Execute Benchmark</span>
             </button>
           </div>
         </div>
 
-        <!-- RACE ARENA -->
-        <div class="py-8 space-y-6">
-
-          <!-- Lane 1: TimescaleDB -->
-          <div class="bg-gray-950 border border-emerald-900/30 rounded-xl p-4 relative overflow-hidden">
-            <div class="flex items-center justify-between text-xs mb-2">
+        <!-- LIVE EXECUTION LANES -->
+        <div class="py-6 space-y-5">
+          
+          <!-- TimescaleDB Lane -->
+          <div class="bg-[#070b13] border border-cyan-500/30 rounded-xl p-4 relative overflow-hidden">
+            <div class="flex items-center justify-between text-xs mb-2.5">
               <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                <span class="font-bold text-white text-sm">TimescaleDB 2.16 (Continuous Aggregate)</span>
-                <span class="text-gray-400 font-mono text-[11px]">&bull; Pre-calculated materialized hypertable</span>
+                <span class="px-2 py-0.5 rounded bg-cyan-950 text-cyan-400 border border-cyan-500/30 font-mono text-[10px] font-bold">TIMESCALEDB 2.16</span>
+                <span id="ts-plan-type" class="text-slate-300 font-mono text-[11px]">Materialized Hypertable Scan</span>
               </div>
-              <div id="ts-timer" class="font-mono font-bold text-emerald-400 text-sm">0.0 ms</div>
+              <div class="flex items-center gap-3">
+                <span id="ts-buffer-count" class="text-[11px] font-mono text-slate-400">Buffers: 932 hit</span>
+                <div id="ts-timer" class="font-mono font-bold text-cyan-400 text-sm">0.00 ms</div>
+              </div>
             </div>
 
             <!-- Progress Bar -->
-            <div class="w-full bg-gray-900 h-6 rounded-lg overflow-hidden p-0.5 border border-gray-800 relative">
-              <div id="ts-progress" class="bg-gradient-to-r from-emerald-600 to-teal-400 h-full rounded-md transition-all duration-75 flex items-center justify-end pr-2 text-[10px] font-bold text-black" style="width: 0%">
-                <span id="ts-status-text" class="hidden">DONE!</span>
+            <div class="w-full bg-[#05070d] h-5 rounded-md overflow-hidden p-0.5 border border-white/10 relative">
+              <div id="ts-progress" class="bg-gradient-to-r from-cyan-600 to-blue-500 h-full rounded transition-all duration-75 flex items-center justify-end pr-2 text-[10px] font-mono font-bold text-white" style="width: 0%">
+                <span id="ts-label" class="hidden">COMPLETED (12.01 ms)</span>
               </div>
             </div>
-            
-            <div id="ts-explanation" class="text-xs text-gray-400 mt-2 flex items-center justify-between">
-              <span>Strategy: Direct Index Scan on 3,360 pre-materialized summary rows.</span>
-              <span class="text-emerald-400 font-semibold">Touched only 932 RAM buffers!</span>
+
+            <!-- Execution Pipeline Stages -->
+            <div class="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/5 text-[11px] font-mono">
+              <div id="ts-step-1" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 1. Plan & Rewrite
+              </div>
+              <div id="ts-step-2" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 2. Chunk Invalidation
+              </div>
+              <div id="ts-step-3" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 3. Materialized Index Scan
+              </div>
+              <div id="ts-step-4" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 4. 3,360 Tuples Returned
+              </div>
             </div>
           </div>
 
-          <!-- Lane 2: Standard PostgreSQL 16 -->
-          <div class="bg-gray-950 border border-amber-900/30 rounded-xl p-4 relative overflow-hidden">
-            <div class="flex items-center justify-between text-xs mb-2">
+          <!-- PostgreSQL 16 Lane -->
+          <div class="bg-[#070b13] border border-amber-500/25 rounded-xl p-4 relative overflow-hidden">
+            <div class="flex items-center justify-between text-xs mb-2.5">
               <div class="flex items-center gap-2">
-                <span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                <span class="font-bold text-white text-sm">PostgreSQL 16 Baseline (Heap Table)</span>
-                <span class="text-gray-400 font-mono text-[11px]">&bull; Sequential Table Scan + HashAggregate</span>
+                <span class="px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-500/30 font-mono text-[10px] font-bold">POSTGRESQL 16.4</span>
+                <span id="pg-plan-type" class="text-slate-300 font-mono text-[11px]">Parallel Seq Scan + HashAggregate</span>
               </div>
-              <div id="pg-timer" class="font-mono font-bold text-amber-400 text-sm">0.0 ms</div>
+              <div class="flex items-center gap-3">
+                <span id="pg-buffer-count" class="text-[11px] font-mono text-slate-400">Buffers: 10,080 read</span>
+                <div id="pg-timer" class="font-mono font-bold text-amber-400 text-sm">0.00 ms</div>
+              </div>
             </div>
 
             <!-- Progress Bar -->
-            <div class="w-full bg-gray-900 h-6 rounded-lg overflow-hidden p-0.5 border border-gray-800 relative">
-              <div id="pg-progress" class="bg-gradient-to-r from-amber-600 to-orange-500 h-full rounded-md transition-all duration-75 flex items-center justify-end pr-2 text-[10px] font-bold text-black" style="width: 0%">
-                <span id="pg-status-text" class="hidden">DONE!</span>
+            <div class="w-full bg-[#05070d] h-5 rounded-md overflow-hidden p-0.5 border border-white/10 relative">
+              <div id="pg-progress" class="bg-gradient-to-r from-amber-600 to-orange-500 h-full rounded transition-all duration-75 flex items-center justify-end pr-2 text-[10px] font-mono font-bold text-white" style="width: 0%">
+                <span id="pg-label" class="hidden">COMPLETED (518.90 ms)</span>
               </div>
             </div>
 
-            <div id="pg-explanation" class="text-xs text-gray-400 mt-2 flex items-center justify-between">
-              <span id="pg-live-scan">Strategy: Scanning all 1,209,600 physical tuples in heap memory...</span>
-              <span class="text-amber-400 font-semibold">10,080 buffer pages fetched</span>
+            <!-- Execution Pipeline Stages -->
+            <div class="grid grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/5 text-[11px] font-mono">
+              <div id="pg-step-1" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 1. Gather Motion
+              </div>
+              <div id="pg-step-2" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 2. Heap Page Scans
+              </div>
+              <div id="pg-step-3" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 3. Hash Table Spilling
+              </div>
+              <div id="pg-step-4" class="text-slate-500 flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> 4. 1,209,600 Rows Filtered
+              </div>
             </div>
           </div>
 
-          <!-- Result Banner (Hidden initially) -->
-          <div id="race-winner-banner" class="hidden p-4 rounded-xl bg-emerald-950/60 border border-emerald-500/40 text-center animate-fade-in">
-            <div class="inline-flex items-center gap-2 text-emerald-400 font-extrabold text-base">
-              <i data-lucide="award" class="w-6 h-6"></i>
-              <span id="winner-headline">TimescaleDB wins! 43.22x Faster Execution!</span>
+          <!-- Empirical Metric Outcome Callout -->
+          <div id="benchmark-outcome" class="hidden p-4 rounded-xl bg-cyan-950/40 border border-cyan-500/30">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center gap-2">
+                <i data-lucide="check-circle-2" class="w-5 h-5 text-cyan-400"></i>
+                <span id="outcome-headline" class="font-bold text-white text-sm">Execution Completed: 43.22x Query Acceleration</span>
+              </div>
+              <span class="text-xs font-mono text-cyan-400 font-semibold">Latency Delta: &minus;506.89 ms</span>
             </div>
-            <p id="winner-detail" class="text-xs text-gray-300 mt-1 max-w-2xl mx-auto">
-              TimescaleDB answered in 12.01 milliseconds because its Continuous Aggregate maintained sliding averages in the background. PostgreSQL spent 518.90 milliseconds reading and hashing all 1.21 million rows from scratch.
+            <p id="outcome-detail" class="text-xs text-slate-300 mt-1.5 leading-relaxed">
+              TimescaleDB resolved the query in 12.01 ms by leveraging pre-aggregated continuous materialized view state. PostgreSQL executed a full sequential scan across 10,080 heap disk blocks and aggregated 1.21 million tuples in memory.
             </p>
           </div>
 
         </div>
 
-        <!-- Latency Chart Comparison -->
-        <div class="mt-4 pt-6 border-t border-gray-800 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Latency Chart & Query Definitions -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-5 border-t border-white/10">
+          
           <div>
-            <h3 class="text-xs font-bold text-gray-300 uppercase tracking-wider mb-3">Latency Comparison (Lower is Better)</h3>
-            <div class="h-64">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 font-mono">Empirical Latency Profile (Milliseconds)</h3>
+            <div class="h-60">
               <canvas id="chartQueryLatency"></canvas>
             </div>
           </div>
-          <div class="flex flex-col justify-center bg-gray-950 p-5 rounded-xl border border-gray-800">
-            <h4 class="text-sm font-bold text-white mb-2 flex items-center gap-2">
-              <i data-lucide="help-circle" class="w-4 h-4 text-cyan-400"></i>
-              Why is the difference so extreme?
-            </h4>
-            <div class="space-y-3 text-xs text-gray-300">
-              <div class="p-2.5 rounded-lg bg-gray-900 border border-gray-800">
-                <strong class="text-amber-400">PostgreSQL (Old Way):</strong>
-                Every time your dashboard refreshes, the database reads through all 1.21 million rows, groups them by hour in a giant hash table, and sorts them. That burns 500+ ms of CPU time every single refresh.
+
+          <div>
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 font-mono">SQL Execution Specifications</h3>
+            
+            <div class="space-y-3 text-xs font-mono">
+              <div class="p-3 bg-[#060910] border border-cyan-500/20 rounded-lg">
+                <div class="text-cyan-400 font-bold mb-1">// TimescaleDB Continuous Aggregate (Q3)</div>
+                <div class="text-slate-300 text-[11px] overflow-x-auto whitespace-pre">SELECT bucket, sensor_id, avg_temp, max_temp
+FROM sensor_hourly_cagg
+WHERE bucket &gt;= NOW() - INTERVAL '7 days'
+ORDER BY bucket, sensor_id;</div>
+                <div class="text-slate-500 text-[10px] mt-1.5">Strategy: Direct index scan on materialized hypertable &bull; 3,360 rows returned</div>
               </div>
-              <div class="p-2.5 rounded-lg bg-gray-900 border border-gray-800">
-                <strong class="text-emerald-400">TimescaleDB (Smart Way):</strong>
-                Instead of recalculating everything on demand, TimescaleDB computes the hourly summary once as data arrives. When you query it, it only reads the 3,360 answer rows directly. That is why it takes 12 milliseconds!
+
+              <div class="p-3 bg-[#060910] border border-amber-500/20 rounded-lg">
+                <div class="text-amber-400 font-bold mb-1">// PostgreSQL Plain Group-By (Q1)</div>
+                <div class="text-slate-300 text-[11px] overflow-x-auto whitespace-pre">SELECT date_trunc('hour', time) AS bucket,
+       sensor_id, AVG(temperature), MAX(temperature)
+FROM sensor_data_plain
+GROUP BY 1, 2 ORDER BY 1, 2;</div>
+                <div class="text-slate-500 text-[10px] mt-1.5">Strategy: Parallel Sequential Scan + HashAggregate &bull; 1,209,600 rows scanned</div>
               </div>
             </div>
+
           </div>
+
         </div>
 
       </div>
+
     </div>
 
-    <!-- TAB 2: STORAGE & COMPRESSION SAVINGS -->
-    <div id="tab-storage" class="tab-content hidden">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 mb-8">
-        <div class="pb-6 border-b border-gray-800">
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <i data-lucide="hard-drive" class="w-5 h-5 text-emerald-400"></i>
-            Physical Disk Footprint & Gorilla Compression
-          </h2>
-          <p class="text-sm text-gray-400 mt-1">
-            Comparing raw PostgreSQL heap and index bloat against TimescaleDB native columnar chunk compression.
+    <!-- ================================================================= -->
+    <!-- TAB 2: STORAGE & COMPRESSION ARCHITECTURE                         -->
+    <!-- ================================================================= -->
+    <div id="tab-storage" class="tab-content hidden space-y-6">
+      
+      <div class="bg-[#0b101a] border border-white/10 rounded-2xl p-6">
+        
+        <div class="pb-5 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+            <h2 class="text-base font-bold text-white tracking-tight">Physical Storage Footprint & Compression Analysis</h2>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">
+            Empirical storage allocation for 1,209,600 tuples across raw PostgreSQL heap tables and TimescaleDB Gorilla-compressed hypertables.
           </p>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 my-6">
           
-          <!-- Visual Disk Drive Graphic -->
-          <div class="space-y-6">
-            <h3 class="text-xs font-bold text-gray-300 uppercase tracking-wider">Storage Footprint Comparison</h3>
+          <!-- Disk Visualization Graphic -->
+          <div class="space-y-5">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Storage Allocations by Component</h3>
 
-            <!-- PostgreSQL Disk -->
-            <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
-              <div class="flex justify-between items-center text-xs mb-2">
-                <span class="font-bold text-amber-400">PostgreSQL 16 Baseline</span>
-                <span class="font-mono text-white font-bold">152.99 MB</span>
+            <!-- PostgreSQL Disk Bar -->
+            <div class="bg-[#070b13] p-4 rounded-xl border border-white/10">
+              <div class="flex justify-between items-center text-xs mb-2 font-mono">
+                <span class="text-amber-400 font-bold">PostgreSQL 16 (Uncompressed Heap)</span>
+                <span class="text-white font-bold">152.99 MB</span>
               </div>
-              <div class="h-8 bg-gray-900 rounded-lg overflow-hidden flex border border-gray-700">
-                <div class="bg-amber-600/80 flex items-center justify-center text-[10px] text-white font-bold" style="width: 51.5%" title="Heap Data: 78.75 MB">
+              <div class="h-8 bg-[#05080f] rounded-lg overflow-hidden flex border border-white/15">
+                <div class="bg-amber-600/80 flex items-center justify-center text-[10px] text-white font-bold font-mono" style="width: 51.5%" title="Heap Table Data: 78.75 MB">
                   Heap: 78.8 MB (51.5%)
                 </div>
-                <div class="bg-red-700/80 flex items-center justify-center text-[10px] text-white font-bold" style="width: 48.5%" title="Secondary B-Tree Indexes: 74.20 MB">
-                  Index Bloat: 74.2 MB (48.5%)
+                <div class="bg-red-700/80 flex items-center justify-center text-[10px] text-white font-bold font-mono" style="width: 48.5%" title="B-Tree Indexes: 74.24 MB">
+                  Index: 74.2 MB (48.5%)
                 </div>
               </div>
-              <p class="text-[11px] text-gray-400 mt-2">
-                Notice that secondary indexes consume almost half the total space! Monolithic B-Trees waste memory on duplicate keys and pointer overhead.
-              </p>
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 font-mono">
+                <span>Data: 78.75 MB</span>
+                <span class="text-amber-400">Index Bloat: 74.24 MB</span>
+              </div>
             </div>
 
-            <!-- TimescaleDB Disk -->
-            <div class="bg-gray-950 p-4 rounded-xl border border-emerald-900/40 glow-ts">
-              <div class="flex justify-between items-center text-xs mb-2">
-                <span class="font-bold text-emerald-400">TimescaleDB (Gorilla Columnar Compressed)</span>
-                <span class="font-mono text-emerald-400 font-bold">27.66 MB (83.5% Saved)</span>
+            <!-- TimescaleDB Disk Bar -->
+            <div class="bg-[#070b13] p-4 rounded-xl border border-cyan-500/30 glow-cyan">
+              <div class="flex justify-between items-center text-xs mb-2 font-mono">
+                <span class="text-cyan-400 font-bold">TimescaleDB (Gorilla Columnar Chunks)</span>
+                <span class="text-emerald-400 font-bold">27.66 MB (&minus;83.53%)</span>
               </div>
-              <div class="h-8 bg-gray-900 rounded-lg overflow-hidden flex border border-emerald-900/60 relative">
-                <div class="bg-emerald-500 flex items-center justify-center text-[10px] text-black font-extrabold" style="width: 18.1%" title="Compressed Storage: 27.66 MB">
+              <div class="h-8 bg-[#05080f] rounded-lg overflow-hidden flex border border-cyan-500/40 relative">
+                <div class="bg-gradient-to-r from-cyan-600 to-emerald-500 flex items-center justify-center text-[10px] text-black font-extrabold font-mono" style="width: 18.08%">
                   27.7 MB
                 </div>
-                <div class="bg-emerald-950/20 flex-1 flex items-center justify-center text-[10px] text-emerald-400 font-semibold">
-                  &larr; 125.3 MB Free Disk Space Reclaimed (6.07x Factor) &rarr;
+                <div class="flex-1 flex items-center justify-center text-[10px] text-emerald-400/80 font-mono">
+                  125.33 MB Space Reclaimed (6.07&times; Compression Ratio)
                 </div>
               </div>
-              <p class="text-[11px] text-gray-400 mt-2">
-                Closed chunks compress in seconds using Facebook's Gorilla algorithms: timestamps shrink from 64 bits to ~1 bit, and floats compress via XOR differencing.
+              <div class="flex items-center justify-between text-[11px] text-slate-400 mt-2 font-mono">
+                <span>Compressed Chunks: 16.94 MB</span>
+                <span class="text-cyan-400">Hypertable Indexes: 10.72 MB</span>
+              </div>
+            </div>
+
+            <!-- Interactive Compression Inspector -->
+            <div class="p-4 rounded-xl bg-[#060910] border border-white/10 text-xs space-y-2">
+              <div class="font-bold text-white flex items-center gap-2">
+                <i data-lucide="cpu" class="w-4 h-4 text-cyan-400"></i>
+                <span>Gorilla XOR Floating-Point Encoding Mechanics</span>
+              </div>
+              <p class="text-slate-400 leading-relaxed text-[11px]">
+                Because adjacent sensor readings vary smoothly, XORing successive double-precision IEEE 754 floats yields identical exponent bits and high-order mantissa bits, creating wide spans of leading and trailing zeros. The Gorilla encoder bit-packs these differences, condensing 64-bit values to an average of 11.2 bits per reading.
               </p>
             </div>
 
-            <!-- Summary pill -->
-            <div class="p-3 rounded-lg bg-emerald-950/30 border border-emerald-500/30 text-xs text-gray-300 flex items-center gap-3">
-              <i data-lucide="check" class="w-5 h-5 text-emerald-400 shrink-0"></i>
-              <span><strong>The Takeaway:</strong> You can store <strong>6 times more data</strong> on the same hard drive without losing a single decimal point of precision.</span>
-            </div>
           </div>
 
-          <!-- Chart: Storage Breakdown -->
+          <!-- Chart: Disk Breakdown -->
           <div>
-            <h3 class="text-xs font-bold text-gray-300 uppercase tracking-wider mb-3">Physical Disk Breakdown (MB)</h3>
-            <div class="h-72">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-3 font-mono">Physical Storage Distribution (MB)</h3>
+            <div class="h-64">
               <canvas id="chartStorage"></canvas>
             </div>
           </div>
 
         </div>
+
       </div>
+
     </div>
 
-    <!-- TAB 3: 20 IOT SENSORS SIMULATOR -->
-    <div id="tab-sensors" class="tab-content hidden">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 mb-8">
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-6 border-b border-gray-800">
+    <!-- ================================================================= -->
+    <!-- TAB 3: IOT SENSOR MATRIX (20 NODES)                               -->
+    <!-- ================================================================= -->
+    <div id="tab-sensors" class="tab-content hidden space-y-6">
+      
+      <div class="bg-[#0b101a] border border-white/10 rounded-2xl p-6">
+        
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 border-b border-white/10">
           <div>
-            <h2 class="text-lg font-bold text-white flex items-center gap-2">
-              <i data-lucide="radio" class="w-5 h-5 text-cyan-400"></i>
-              Simulated Factory Floor: 20 IoT Environmental Nodes
-            </h2>
-            <p class="text-sm text-gray-400 mt-1">
-              Click any sensor to inspect its current temperature, relative humidity, battery level, and historical query speedup.
+            <div class="flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+              <h2 class="text-base font-bold text-white tracking-tight">Simulated Industrial Sensor Fleet (20 Nodes)</h2>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">
+              Select an individual sensor node to inspect real-time sinusoidal diurnal telemetry, physical parameters, and partition-level query performance.
             </p>
           </div>
-          <div class="flex items-center gap-2 text-xs">
-            <span class="px-2 py-1 rounded bg-blue-900/30 text-blue-300 border border-blue-800">Zone A: Assembly</span>
-            <span class="px-2 py-1 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-800">Zone B: Warehouse</span>
-            <span class="px-2 py-1 rounded bg-amber-900/30 text-amber-300 border border-amber-800">Zone C: Furnace</span>
-            <span class="px-2 py-1 rounded bg-purple-900/30 text-purple-300 border border-purple-800">Zone D: Server Room</span>
+
+          <!-- Zone Filter Buttons -->
+          <div class="flex flex-wrap items-center gap-1.5 text-xs font-mono">
+            <button onclick="filterZone('all')" id="zone-btn-all" class="px-2.5 py-1 rounded-md bg-white/10 text-white font-semibold">ALL</button>
+            <button onclick="filterZone('A')" id="zone-btn-A" class="px-2.5 py-1 rounded-md bg-transparent text-slate-400 hover:text-white">ZONE A (Assembly)</button>
+            <button onclick="filterZone('B')" id="zone-btn-B" class="px-2.5 py-1 rounded-md bg-transparent text-slate-400 hover:text-white">ZONE B (Warehouse)</button>
+            <button onclick="filterZone('C')" id="zone-btn-C" class="px-2.5 py-1 rounded-md bg-transparent text-slate-400 hover:text-white">ZONE C (Furnace)</button>
+            <button onclick="filterZone('D')" id="zone-btn-D" class="px-2.5 py-1 rounded-md bg-transparent text-slate-400 hover:text-white">ZONE D (Server Room)</button>
           </div>
         </div>
 
-        <!-- SENSORS GRID (1 to 20) -->
+        <!-- 20 SENSOR GRID -->
         <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-3 my-6" id="sensors-grid">
-          <!-- Dynamically generated via JS -->
+          <!-- Dynamically populated via JS -->
         </div>
 
-        <!-- SELECTED SENSOR DETAIL MODAL/BOX -->
-        <div id="sensor-detail-box" class="bg-gray-950 p-5 rounded-xl border border-gray-800 transition">
-          <div class="flex items-center justify-between mb-3">
-            <div class="flex items-center gap-2">
-              <span id="detail-sensor-badge" class="px-2.5 py-1 rounded-lg bg-cyan-500/20 text-cyan-400 font-bold text-xs border border-cyan-500/30">Sensor 7</span>
-              <span id="detail-sensor-location" class="text-sm font-semibold text-white">Zone B (Central Warehouse)</span>
+        <!-- ACTIVE SENSOR DETAIL CARD -->
+        <div id="sensor-detail-panel" class="bg-[#060910] p-5 rounded-xl border border-white/10">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/10 mb-4">
+            <div class="flex items-center gap-2.5">
+              <span id="detail-sensor-badge" class="px-2.5 py-1 rounded-md bg-cyan-950 text-cyan-400 font-mono font-bold text-xs border border-cyan-500/30">Sensor 07</span>
+              <span id="detail-sensor-zone" class="text-sm font-bold text-white">Zone B &bull; Central Warehouse Storage</span>
             </div>
-            <span class="text-xs text-gray-400 font-mono">60,480 Samples Collected</span>
+            <div class="text-xs font-mono text-slate-400">
+              Samples Collected: <strong class="text-white">60,480</strong> &bull; Sampling: <strong class="text-cyan-400">10s</strong>
+            </div>
           </div>
-          
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
-              <div class="text-gray-400">Current Temperature</div>
-              <div id="detail-temp" class="text-lg font-bold text-white mt-1">21.43 &deg;C</div>
-              <div class="text-[10px] text-gray-500 mt-1">Diurnal Peak: 14:00 daily</div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-mono">
+            <div class="bg-[#0b101a] p-3 rounded-lg border border-white/10">
+              <div class="text-slate-400 text-[11px]">AMBIENT TEMPERATURE</div>
+              <div id="detail-temp" class="text-xl font-bold text-white mt-1">21.43 &deg;C</div>
+              <div class="text-[10px] text-slate-500 mt-1 font-sans">Diurnal variation: 24h period &plusmn; 4.5&deg;C</div>
             </div>
-            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
-              <div class="text-gray-400">Relative Humidity</div>
-              <div id="detail-hum" class="text-lg font-bold text-white mt-1">68.21 %</div>
-              <div class="text-[10px] text-gray-500 mt-1">Inversely coupled to ambient temp</div>
+
+            <div class="bg-[#0b101a] p-3 rounded-lg border border-white/10">
+              <div class="text-slate-400 text-[11px]">RELATIVE HUMIDITY</div>
+              <div id="detail-hum" class="text-xl font-bold text-white mt-1">68.21 %</div>
+              <div class="text-[10px] text-slate-500 mt-1 font-sans">Inverse diurnal correlation (&minus;0.8 coeff)</div>
             </div>
-            <div class="bg-gray-900 p-3 rounded-lg border border-gray-800">
-              <div class="text-gray-400">Single-Sensor Filter Speedup (Q4)</div>
-              <div class="text-lg font-bold text-emerald-400 mt-1">27.66&times; Faster</div>
-              <div class="text-[10px] text-gray-500 mt-1">1.57 ms (CAGG) vs 43.28 ms (PG)</div>
+
+            <div class="bg-[#0b101a] p-3 rounded-lg border border-cyan-500/30">
+              <div class="text-cyan-400 text-[11px]">Q4 DRILL-DOWN LATENCY</div>
+              <div class="text-xl font-bold text-cyan-400 mt-1">1.57 ms (27.66&times;)</div>
+              <div class="text-[10px] text-slate-400 mt-1 font-sans">PG Baseline: 43.28 ms (168 rows returned)</div>
             </div>
           </div>
         </div>
 
       </div>
+
     </div>
 
-    <!-- TAB 4: PROFESSOR'S CHEAT SHEET / EXPLAIN LIKE I'M 5 -->
-    <div id="tab-cheatsheet" class="tab-content hidden">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 mb-8 space-y-6">
-        <div>
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <i data-lucide="graduation-cap" class="w-5 h-5 text-emerald-400"></i>
-            Professor's Guide: Understanding This Project in 3 Steps
-          </h2>
-          <p class="text-sm text-gray-400 mt-1">
-            How to explain the core computer science breakthroughs to anyone without database jargon.
+    <!-- ================================================================= -->
+    <!-- TAB 4: SYSTEM INTERNALS & ARCHITECTURE                            -->
+    <!-- ================================================================= -->
+    <div id="tab-internals" class="tab-content hidden space-y-6">
+      
+      <div class="bg-[#0b101a] border border-white/10 rounded-2xl p-6">
+        
+        <div class="pb-5 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+            <h2 class="text-base font-bold text-white tracking-tight">Database Internals & Architectural Mechanisms</h2>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">
+            Technical foundation detailing hypertable chunk routing, Gorilla bit-packing, continuous aggregate materialization, and execution plan diffs.
           </p>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-
+        <!-- 3 Core Technical Pillars -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-5 my-6">
+          
           <!-- Pillar 1 -->
-          <div class="bg-gray-950 p-5 rounded-xl border border-gray-800 flex flex-col justify-between">
+          <div class="bg-[#070b13] p-5 rounded-xl border border-white/10 flex flex-col justify-between">
             <div>
-              <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-extrabold mb-3">1</div>
-              <h3 class="font-bold text-white text-sm mb-2">The Relational Trap</h3>
-              <p class="text-xs text-gray-400 leading-relaxed">
-                PostgreSQL was built in 1986 for things like bank accounts where you edit existing rows. When 20 IoT sensors stream readings every 10 seconds, it tries to stuff millions of timestamps into one giant index table. 
-                <br><br>
-                Once that table gets bigger than the computer's RAM, the computer starts frantically reading and writing to disk, causing queries to stall.
+              <div class="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold font-mono text-sm mb-3">01</div>
+              <h3 class="font-bold text-white text-sm mb-1.5">Temporal Hypertable Partitioning</h3>
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                PostgreSQL monolithic tables ingest all tuples into one shared heap with global B-Trees. As index size eclipses <code class="text-cyan-300 font-mono">shared_buffers</code>, leaf splits cause cache evictions and random I/O. TimescaleDB partitions time into discrete 1-day chunks. Writes target solely the active chunk, remaining pinned in L3/RAM cache.
               </p>
             </div>
-            <div class="mt-4 pt-3 border-t border-gray-800 text-[11px] text-amber-400 font-semibold">
-              Symptoms: Sluggish dashboards, 500ms lag.
+            <div class="mt-4 pt-3 border-t border-white/10 text-[11px] font-mono text-cyan-400">
+              Chunk Interval: 1 Day (172,800 tuples/chunk)
             </div>
           </div>
 
           <!-- Pillar 2 -->
-          <div class="bg-gray-950 p-5 rounded-xl border border-emerald-900/30 flex flex-col justify-between">
+          <div class="bg-[#070b13] p-5 rounded-xl border border-white/10 flex flex-col justify-between">
             <div>
-              <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-extrabold mb-3">2</div>
-              <h3 class="font-bold text-white text-sm mb-2">Hypertable Chunking</h3>
-              <p class="text-xs text-gray-400 leading-relaxed">
-                TimescaleDB solves this by slicing the giant table into small, daily boxes ("chunks"). 
-                <br><br>
-                Today's data goes into today's box in super-fast RAM. Yesterday's box gets closed, turned on its side into columns, and compressed like a ZIP file (Gorilla compression). Old data takes 83% less space, and active writes never stall!
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold font-mono text-sm mb-3">02</div>
+              <h3 class="font-bold text-white text-sm mb-1.5">Gorilla Delta-of-Delta & XOR</h3>
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                Closed historical chunks transform into compressed columnar relations. 64-bit timestamps with regular 10s intervals yield constant first-order differences ($D = 10$), making second-order differences zero ($D' = 0$), encoded in a single bit. Float metrics are XORed with preceding values to eliminate redundant mantissa bits.
               </p>
             </div>
-            <div class="mt-4 pt-3 border-t border-gray-800 text-[11px] text-emerald-400 font-semibold">
-              Result: Constant 28k+ rows/s insertion.
+            <div class="mt-4 pt-3 border-t border-white/10 text-[11px] font-mono text-emerald-400">
+              Achieved Ratio: 6.07:1 (83.53% reduction)
             </div>
           </div>
 
           <!-- Pillar 3 -->
-          <div class="bg-gray-950 p-5 rounded-xl border border-blue-900/30 flex flex-col justify-between">
+          <div class="bg-[#070b13] p-5 rounded-xl border border-white/10 flex flex-col justify-between">
             <div>
-              <div class="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-extrabold mb-3">3</div>
-              <h3 class="font-bold text-white text-sm mb-2">Continuous Aggregates</h3>
-              <p class="text-xs text-gray-400 leading-relaxed">
-                When a professor looks at a graph of hourly average temperature, PostgreSQL counts and calculates all 1.21 million numbers live on the spot.
-                <br><br>
-                TimescaleDB calculates the hourly averages incrementally in the background. When queried, it only reads the 3,360 pre-made answers, dropping query time from 518\,ms down to 12\,ms!
+              <div class="w-8 h-8 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold font-mono text-sm mb-3">03</div>
+              <h3 class="font-bold text-white text-sm mb-1.5">Continuous Aggregate Materialization</h3>
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                PostgreSQL executes analytical rollups via full-table parallel sequential scans and hash aggregates across 1,209,600 tuples. TimescaleDB Continuous Aggregates incrementally pre-materialize bucketed aggregations into internal hypertable tables, converting multi-megabyte disk scans into direct primary index seeks over 3,360 rows.
               </p>
             </div>
-            <div class="mt-4 pt-3 border-t border-gray-800 text-[11px] text-blue-400 font-semibold">
-              Result: 43.2x instant dashboard speedup.
+            <div class="mt-4 pt-3 border-t border-white/10 text-[11px] font-mono text-amber-400">
+              Speedup Factor: 43.22x (12.01 ms vs 518.90 ms)
             </div>
           </div>
 
         </div>
 
-        <!-- 5 Viva Q&A Accordion -->
-        <div class="pt-6 border-t border-gray-800">
-          <h3 class="font-bold text-white text-sm mb-4 flex items-center gap-2">
-            <i data-lucide="help-circle" class="w-4 h-4 text-emerald-400"></i>
-            Top 5 Viva Questions & Fast Answers:
+        <!-- EXPLAIN ANALYZE Comparison View -->
+        <div class="pt-5 border-t border-white/10 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="font-bold text-white text-sm font-mono flex items-center gap-2">
+              <i data-lucide="git-pull-request" class="w-4 h-4 text-cyan-400"></i>
+              <span>Execution Plan Diff (EXPLAIN ANALYZE)</span>
+            </h3>
+            <span class="text-xs text-slate-400 font-mono">Q1 / Q3 Query Profile</span>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono">
+            
+            <!-- Plan 1: TimescaleDB -->
+            <div class="p-4 bg-[#060910] border border-cyan-500/30 rounded-xl space-y-2">
+              <div class="text-cyan-400 font-bold flex items-center justify-between">
+                <span>TimescaleDB (CAGG Execution Plan)</span>
+                <span class="text-emerald-400">Total: 12.01 ms</span>
+              </div>
+              <div class="text-slate-300 text-[11px] leading-relaxed">
+                Sort (cost=142.10..150.50 rows=3360 width=48)<br>
+                &nbsp;&nbsp;Sort Key: _materialized_hypertable_2.bucket, sensor_id<br>
+                &nbsp;&nbsp;-&gt; Custom Scan (ChunkAppend) on _materialized_hypertable_2<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Chunks excluded by pruning: 0<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-&gt; Index Scan on _hyper_2_1_chunk (rows=3360)<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Buffers: shared hit=932 read=0
+              </div>
+            </div>
+
+            <!-- Plan 2: PostgreSQL -->
+            <div class="p-4 bg-[#060910] border border-amber-500/30 rounded-xl space-y-2">
+              <div class="text-amber-400 font-bold flex items-center justify-between">
+                <span>PostgreSQL 16 (Heap Execution Plan)</span>
+                <span class="text-amber-400">Total: 518.90 ms</span>
+              </div>
+              <div class="text-slate-300 text-[11px] leading-relaxed">
+                Finalize GroupAggregate (cost=22841.20..24110.50 rows=3360)<br>
+                &nbsp;&nbsp;Group Key: (date_trunc('hour', time)), sensor_id<br>
+                &nbsp;&nbsp;-&gt; Gather Merge (cost=22841.20..23908.90 workers=3)<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-&gt; Partial HashAggregate (rows=3360)<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;-&gt; Parallel Seq Scan on sensor_data_plain<br>
+                &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Rows Scanned: 1,209,600 | Buffers: read=10,080
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Viva Technical Defense & Rationale Accordion -->
+        <div class="pt-6 border-t border-white/10 space-y-3">
+          <h3 class="font-bold text-white text-sm font-mono flex items-center gap-2">
+            <i data-lucide="shield-alert" class="w-4 h-4 text-emerald-400"></i>
+            <span>Project Defense & Viva Technical Evaluation Rationale</span>
           </h3>
-          <div class="space-y-3 text-xs">
-            <div class="p-3 bg-gray-950 rounded-xl border border-gray-800">
-              <span class="font-bold text-emerald-400">Q1: Why did PostgreSQL have slightly higher bulk insert speed (29.1k vs 28.7k rows/s)?</span>
-              <p class="text-gray-300 mt-1">PostgreSQL dumps straight into one flat table. TimescaleDB has to inspect timestamps and route rows into specific daily chunks. That routing takes a tiny 1.4% overhead, but it prevents crashes later.</p>
+
+          <div class="space-y-2.5 text-xs">
+            
+            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
+              <div class="font-bold text-cyan-400 font-mono">1. Why did vanilla PostgreSQL maintain a nominal 1.4% higher raw bulk insertion throughput (29,142 vs 28,735 rows/sec)?</div>
+              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
+                Vanilla PostgreSQL writes directly to an unpartitioned heap block using straightforward append-only operations with no partition routing logic. TimescaleDB intercepts every batch at the tuple routing layer to extract timestamps, evaluate chunk boundary catalog entries, and dynamically allocate chunk partitions. This introduces a slight CPU routing cost of 1.4%, which prevents subsequent write stalls as tables expand beyond memory bounds.
+              </p>
             </div>
-            <div class="p-3 bg-gray-950 rounded-xl border border-gray-800">
-              <span class="font-bold text-emerald-400">Q2: How does Gorilla compression get an 83.5% space reduction?</span>
-              <p class="text-gray-300 mt-1">Sensors log every 10 seconds. The time delta is always 10 seconds, so Delta-of-Delta is 0 (stored as 1 bit). Temperatures vary by tiny decimals, so XOR differences have matching prefixes and compress from 8 bytes down to ~1.5 bytes.</p>
+
+            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
+              <div class="font-bold text-cyan-400 font-mono">2. How does the Gorilla compression algorithm eliminate 83.53% of physical disk footprint?</div>
+              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
+                IoT telemetry exhibits predictable regularity. Fixed 10-second sampling results in zero second-order timestamp variation ($D' = D_i - D_{i-1} = 0$), which Gorilla bit-packs as a single '0' bit instead of an 8-byte integer. Environmental sensor parameters fluctuate continuously without abrupt discontinuities; XORing adjacent IEEE 754 float values leaves identical sign, exponent, and high-order mantissa bits, collapsing 64-bit double values down into approximately 11 to 14 bits.
+              </p>
             </div>
-            <div class="p-3 bg-gray-950 rounded-xl border border-gray-800">
-              <span class="font-bold text-emerald-400">Q3: Why did PostgreSQL indexes take up 48.5% of total disk space?</span>
-              <p class="text-gray-300 mt-1">Because standard B-Trees store row pointers and index keys for every single record. For small sensor rows, the index tree is almost as large as the raw data itself!</p>
+
+            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
+              <div class="font-bold text-cyan-400 font-mono">3. What is the cause of secondary B-Tree indexes occupying 48.5% of PostgreSQL's total storage?</div>
+              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
+                Standard B-Tree indexes require dedicated tree leaf and internal pages containing 6-byte tuple identifiers (ItemPointer/TID) plus full attribute keys for every single inserted tuple. For narrow IoT records (timestamp, sensor_id, and 3 float readings = ~32 bytes), secondary indexes on (time) and (sensor_id, time DESC) contribute 74.24 MB of index structures on top of 78.75 MB of heap tuples.
+              </p>
             </div>
-            <div class="p-3 bg-gray-950 rounded-xl border border-gray-800">
-              <span class="font-bold text-emerald-400">Q4: What is the downside of TimescaleDB chunk compression?</span>
-              <p class="text-gray-300 mt-1">Compressed chunks are columnar and read-only. If you need to run frequent UPDATE or DELETE commands on historical data, you must decompress the chunk first.</p>
+
+            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
+              <div class="font-bold text-cyan-400 font-mono">4. What operational trade-offs accompany hypertable chunk compression?</div>
+              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
+                Compressed chunks are transformed into read-only columnar representations. Any subsequent DML modifications (UPDATE, DELETE, or late-arriving out-of-order data older than the compression policy threshold) require explicit chunk decompression before execution. Consequently, the compression policy must be configured past the maximum expected network jitter window (e.g., 2 hours).
+              </p>
             </div>
-            <div class="p-3 bg-gray-950 rounded-xl border border-gray-800">
-              <span class="font-bold text-emerald-400">Q5: Can we use regular SQL with TimescaleDB?</span>
-              <p class="text-gray-300 mt-1">Yes! TimescaleDB is built directly inside PostgreSQL as an extension. You can run regular SQL SELECT, JOIN with student/inventory tables, and use standard drivers like psycopg2.</p>
+
+            <div class="p-3 bg-[#070b13] rounded-lg border border-white/10">
+              <div class="font-bold text-cyan-400 font-mono">5. Is standard SQL syntax and relational integrity preserved under TimescaleDB?</div>
+              <p class="text-slate-300 mt-1 leading-relaxed font-sans">
+                TimescaleDB is implemented directly as a PostgreSQL C extension rather than an independent external engine. Hypertables support standard SQL SELECT, complex JOIN operations against relational metadata tables, window functions, user-defined functions, and standard client drivers (including psycopg2, libpq, and JDBC) without query modification.
+              </p>
             </div>
+
           </div>
         </div>
 
       </div>
+
     </div>
 
-    <!-- TAB 5: DELIVERABLES & TEAM BLOCK -->
-    <div id="tab-artifacts" class="tab-content hidden">
-      <div class="bg-gray-900/80 border border-gray-800 rounded-2xl p-6 mb-8 space-y-6">
-        <div>
-          <h2 class="text-lg font-bold text-white flex items-center gap-2">
-            <i data-lucide="folder-check" class="w-5 h-5 text-emerald-400"></i>
-            Project Deliverables & Group Roster
-          </h2>
-          <p class="text-sm text-gray-400 mt-1">
-            Access the peer-reviewed format IEEE research paper, presentation deck, verified datasets, and code.
+    <!-- ================================================================= -->
+    <!-- TAB 5: ACADEMIC DELIVERABLES & TEAM ROSTER                         -->
+    <!-- ================================================================= -->
+    <div id="tab-deliverables" class="tab-content hidden space-y-6">
+      
+      <div class="bg-[#0b101a] border border-white/10 rounded-2xl p-6">
+        
+        <div class="pb-5 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+            <h2 class="text-base font-bold text-white tracking-tight">Project Deliverables & Repository Artifacts</h2>
+          </div>
+          <p class="text-xs text-slate-400 mt-1">
+            Access the peer-reviewed format IEEE research paper, presentation deck, verified datasets, and source code.
           </p>
         </div>
 
-        <!-- Download Cards Grid -->
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- Deliverables Grid -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-6">
           
-          <a href="DBMS_Project_2.pdf" target="_blank" class="bg-gray-950 border border-gray-800 hover:border-emerald-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
+          <!-- Article PDF -->
+          <a href="DBMS_Project_2.pdf" target="_blank" class="bg-[#060910] border border-white/10 hover:border-cyan-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
             <div>
               <div class="flex items-center justify-between mb-2">
-                <i data-lucide="file-text" class="w-6 h-6 text-emerald-400"></i>
-                <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">PDF Document</span>
+                <i data-lucide="file-text" class="w-5 h-5 text-cyan-400"></i>
+                <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">PDF DOCUMENT</span>
               </div>
-              <h3 class="font-bold text-white text-sm group-hover:text-emerald-400 transition">Research Article</h3>
-              <p class="text-xs text-gray-400 mt-1">Final IEEE-format paper with zero formula overflows & TikZ figures.</p>
+              <h3 class="font-bold text-white text-sm group-hover:text-cyan-400 transition">Research Article</h3>
+              <p class="text-xs text-slate-400 mt-1">IEEE-format comparative evaluation with mathematical formulations and benchmark tables.</p>
             </div>
-            <div class="mt-4 text-xs font-semibold text-emerald-400 flex items-center gap-1">
-              Open PDF &rarr;
+            <div class="mt-4 text-xs font-mono font-semibold text-cyan-400 flex items-center gap-1">
+              <span>Open Document</span> &rarr;
             </div>
           </a>
 
-          <a href="G13_TimescaleDB_Presentation.pptx" download class="bg-gray-950 border border-gray-800 hover:border-blue-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
+          <!-- Slide Deck -->
+          <a href="G13_TimescaleDB_Presentation.pptx" download class="bg-[#060910] border border-white/10 hover:border-blue-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
             <div>
               <div class="flex items-center justify-between mb-2">
-                <i data-lucide="presentation" class="w-6 h-6 text-blue-400"></i>
-                <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">PPTX Slides</span>
+                <i data-lucide="presentation" class="w-5 h-5 text-blue-400"></i>
+                <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">PPTX SLIDES</span>
               </div>
-              <h3 class="font-bold text-white text-sm group-hover:text-blue-400 transition">Presentation Deck</h3>
-              <p class="text-xs text-gray-400 mt-1">10-slide viva presentation with complete speaker scripts.</p>
+              <h3 class="font-bold text-white text-sm group-hover:text-blue-400 transition">Presentation Slides</h3>
+              <p class="text-xs text-slate-400 mt-1">10-slide oral examination deck with explicit speaker role allocations.</p>
             </div>
-            <div class="mt-4 text-xs font-semibold text-blue-400 flex items-center gap-1">
-              Download Slides &rarr;
+            <div class="mt-4 text-xs font-mono font-semibold text-blue-400 flex items-center gap-1">
+              <span>Download Slides</span> &rarr;
             </div>
           </a>
 
-          <a href="plagiarism_report.pdf" target="_blank" class="bg-gray-950 border border-gray-800 hover:border-cyan-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
+          <!-- Plagiarism Verification -->
+          <a href="plagiarism_report.pdf" target="_blank" class="bg-[#060910] border border-white/10 hover:border-emerald-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
             <div>
               <div class="flex items-center justify-between mb-2">
-                <i data-lucide="shield-check" class="w-6 h-6 text-cyan-400"></i>
-                <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400">Verified</span>
+                <i data-lucide="shield-check" class="w-5 h-5 text-emerald-400"></i>
+                <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AUDIT VERIFIED</span>
               </div>
-              <h3 class="font-bold text-white text-sm group-hover:text-cyan-400 transition">Plagiarism Report</h3>
-              <p class="text-xs text-gray-400 mt-1">Official report confirming 98% human-written score & originality.</p>
+              <h3 class="font-bold text-white text-sm group-hover:text-emerald-400 transition">Authenticity Audit</h3>
+              <p class="text-xs text-slate-400 mt-1">Plagiarism and AI originality report verifying human authorship and citation integrity.</p>
             </div>
-            <div class="mt-4 text-xs font-semibold text-cyan-400 flex items-center gap-1">
-              View Report &rarr;
+            <div class="mt-4 text-xs font-mono font-semibold text-emerald-400 flex items-center gap-1">
+              <span>Inspect Audit</span> &rarr;
             </div>
           </a>
 
-          <a href="https://github.com/kamaljeetdhiman/DBMS-Project" target="_blank" class="bg-gray-950 border border-gray-800 hover:border-purple-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
+          <!-- Codebase -->
+          <a href="https://github.com/kamaljeetdhiman/DBMS-Project" target="_blank" class="bg-[#060910] border border-white/10 hover:border-purple-500/50 p-4 rounded-xl flex flex-col justify-between group transition">
             <div>
               <div class="flex items-center justify-between mb-2">
-                <i data-lucide="code" class="w-6 h-6 text-purple-400"></i>
-                <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Git Source</span>
+                <i data-lucide="git-merge" class="w-5 h-5 text-purple-400"></i>
+                <span class="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">GIT REPO</span>
               </div>
-              <h3 class="font-bold text-white text-sm group-hover:text-purple-400 transition">GitHub Codebase</h3>
-              <p class="text-xs text-gray-400 mt-1">Docker Compose, Python benchmark testbed, Grafana, LaTeX.</p>
+              <h3 class="font-bold text-white text-sm group-hover:text-purple-400 transition">Source Codebase</h3>
+              <p class="text-xs text-slate-400 mt-1">Docker Compose testbed, benchmark harness script, Grafana configs, and LaTeX source.</p>
             </div>
-            <div class="mt-4 text-xs font-semibold text-purple-400 flex items-center gap-1">
-              Browse Repo &rarr;
+            <div class="mt-4 text-xs font-mono font-semibold text-purple-400 flex items-center gap-1">
+              <span>View Repository</span> &rarr;
             </div>
           </a>
 
         </div>
 
-        <!-- TEAM ROSTER BLOCK -->
-        <div class="bg-gray-950 p-6 rounded-xl border border-gray-800">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-gray-800 mb-4">
+        <!-- Student Author Attribution Roster -->
+        <div class="bg-[#070b13] p-5 rounded-xl border border-white/10">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-white/10 mb-4">
             <div>
-              <h3 class="text-sm font-bold text-white">Project Group G13 &bull; Student Roster</h3>
-              <p class="text-xs text-gray-400">Department of Information Technology &bull; NIT Jalandhar</p>
+              <h3 class="text-sm font-bold text-white tracking-tight">Project Group G13 &bull; Student Author Roster</h3>
+              <p class="text-xs text-slate-400">Department of Information Technology &bull; Dr. B. R. Ambedkar National Institute of Technology Jalandhar</p>
             </div>
-            <span class="text-xs text-emerald-400 font-mono font-semibold">Course: Database Management Systems</span>
+            <span class="text-xs text-cyan-400 font-mono font-semibold">Course: Database Management Systems (CSX-208)</span>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-            <div class="p-3 bg-gray-900 rounded-lg border border-gray-800">
-              <div class="font-bold text-white">Khushpreet Kaur</div>
-              <div class="text-emerald-400 font-mono mt-0.5">Roll No: 25124051</div>
-              <div class="text-gray-400 mt-1">Architecture & Analysis</div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
+            <div class="p-3 bg-[#0b101a] rounded-lg border border-white/10">
+              <div class="font-bold text-white font-sans text-sm">Khushpreet Kaur</div>
+              <div class="text-cyan-400 mt-0.5">Roll No: 25124051</div>
+              <div class="text-slate-400 text-[11px] mt-1 font-sans">System Architecture & Empirical Analysis</div>
             </div>
-            <div class="p-3 bg-gray-900 rounded-lg border border-gray-800">
-              <div class="font-bold text-white">Krish Sharma</div>
-              <div class="text-emerald-400 font-mono mt-0.5">Roll No: 25124052</div>
-              <div class="text-gray-400 mt-1">Literature Review & Queries</div>
+
+            <div class="p-3 bg-[#0b101a] rounded-lg border border-white/10">
+              <div class="font-bold text-white font-sans text-sm">Krish Sharma</div>
+              <div class="text-cyan-400 mt-0.5">Roll No: 25124052</div>
+              <div class="text-slate-400 text-[11px] mt-1 font-sans">Literature Review & Query Optimization</div>
             </div>
-            <div class="p-3 bg-gray-900 rounded-lg border border-gray-800">
-              <div class="font-bold text-white">Kamaljeet Singh</div>
-              <div class="text-emerald-400 font-mono mt-0.5">Roll No: 25124050</div>
-              <div class="text-gray-400 mt-1">Harness & Docker Setup</div>
+
+            <div class="p-3 bg-[#0b101a] rounded-lg border border-white/10">
+              <div class="font-bold text-white font-sans text-sm">Kamaljeet Singh</div>
+              <div class="text-cyan-400 mt-0.5">Roll No: 25124050</div>
+              <div class="text-slate-400 text-[11px] mt-1 font-sans">Docker Harness & Benchmark Orchestration</div>
             </div>
-            <div class="p-3 bg-gray-900 rounded-lg border border-gray-800">
-              <div class="font-bold text-white">Jitendra Chaudhary</div>
-              <div class="text-emerald-400 font-mono mt-0.5">Roll No: 25124049</div>
-              <div class="text-gray-400 mt-1">Empirical Stats & Slides</div>
+
+            <div class="p-3 bg-[#0b101a] rounded-lg border border-white/10">
+              <div class="font-bold text-white font-sans text-sm">Jitendra Chaudhary</div>
+              <div class="text-cyan-400 mt-0.5">Roll No: 25124049</div>
+              <div class="text-slate-400 text-[11px] mt-1 font-sans">Statistical Profiling & Oral Presentation</div>
             </div>
           </div>
         </div>
 
       </div>
+
     </div>
 
   </main>
 
-  <!-- FOOTER -->
-  <footer class="border-t border-gray-800 bg-gray-950/80 py-4 text-center text-xs text-gray-500">
+  <!-- RESTRAINED TECHNICAL FOOTER -->
+  <footer class="border-t border-white/10 bg-[#05080f] py-4 text-center text-xs text-slate-500 font-mono">
     <p>&copy; 2026 Group G13 &bull; Department of Information Technology &bull; Dr. B. R. Ambedkar National Institute of Technology Jalandhar</p>
   </footer>
 
-  <!-- JAVASCRIPT LOGIC -->
+  <!-- SCRIPT LOGIC -->
   <script>
     // Initialize Lucide Icons
     lucide.createIcons();
 
-    // Tab Navigation
+    // Tab Navigation Logic
     function switchTab(tabId) {
       document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
       document.getElementById('tab-' + tabId).classList.remove('hidden');
 
-      const tabs = ['race', 'storage', 'sensors', 'cheatsheet', 'artifacts'];
+      const tabs = ['benchmark', 'storage', 'sensors', 'internals', 'deliverables'];
       tabs.forEach(t => {
         const btn = document.getElementById('tab-btn-' + t);
         if (t === tabId) {
-          btn.className = 'px-3.5 py-1.5 rounded-lg transition-all text-white bg-emerald-600 shadow-sm flex items-center gap-1.5';
+          btn.className = 'px-3.5 py-1.5 rounded-lg transition-all text-white bg-cyan-600 shadow-sm flex items-center gap-1.5';
         } else {
-          btn.className = 'px-3.5 py-1.5 rounded-lg transition-all text-gray-400 hover:text-white flex items-center gap-1.5';
+          btn.className = 'px-3.5 py-1.5 rounded-lg transition-all text-slate-400 hover:text-white flex items-center gap-1.5';
         }
       });
       lucide.createIcons();
     }
 
-    // Benchmark Data
-    const benchData = {
+    // Benchmark Dataset
+    const benchmarkScenarios = {
       q1_q3: {
         tsMs: 12.01,
         pgMs: 518.90,
-        speedup: '43.22x',
-        headline: 'TimescaleDB wins! 43.22x Faster Rollup Execution!',
-        detail: 'TimescaleDB answered in 12.01 ms via pre-materialized Continuous Aggregates (3,360 rows). PostgreSQL took 518.90 ms scanning and hashing all 1,209,600 physical tuples.'
+        tsPlan: 'Materialized Hypertable Scan (sensor_hourly_cagg)',
+        pgPlan: 'Parallel Seq Scan + HashAggregate (sensor_data_plain)',
+        tsBuffers: 'Buffers: 932 hit',
+        pgBuffers: 'Buffers: 10,080 read',
+        headline: 'Execution Completed: 43.22x Query Acceleration',
+        delta: '-506.89 ms',
+        detail: 'TimescaleDB resolved the query in 12.01 ms by leveraging pre-aggregated continuous materialized view state (3,360 rows). PostgreSQL executed a full sequential scan across 10,080 heap disk blocks and aggregated 1,209,600 tuples in memory.',
+        tsSteps: ['1. Plan & Rewrite', '2. Chunk Invalidation', '3. Materialized Index Scan', '4. 3,360 Tuples Returned'],
+        pgSteps: ['1. Gather Motion', '2. Heap Page Scans', '3. Hash Table Spilling', '4. 1,209,600 Rows Filtered']
       },
       q4: {
         tsMs: 1.57,
         pgMs: 43.28,
-        speedup: '27.66x',
-        headline: 'TimescaleDB wins! 27.66x Faster Single-Sensor Drill-Down!',
-        detail: 'TimescaleDB scanned exactly 168 pre-computed rows in 1.57 ms (Index Scan Backward). PostgreSQL scanned 60,480 matching heap pages via Bitmap Index Scan in 43.28 ms.'
+        tsPlan: 'Index Scan Backward on Continuous Aggregate',
+        pgPlan: 'Bitmap Index Scan on idx_sensor_plain_sensor_time',
+        tsBuffers: 'Buffers: 48 hit',
+        pgBuffers: 'Buffers: 1,840 hit',
+        headline: 'Execution Completed: 27.66x Sensor Drill-Down Acceleration',
+        delta: '-41.71 ms',
+        detail: 'TimescaleDB retrieved 168 pre-computed hourly points for Sensor 7 in 1.57 ms via direct backward index scan. PostgreSQL traversed B-Tree index pages and mapped 60,480 matching heap tuples via bitmap scan in 43.28 ms.',
+        tsSteps: ['1. Parse & Bind', '2. B-Tree Seek (Sensor 7)', '3. 168 Leaf Tuples', '4. Output Stream'],
+        pgSteps: ['1. Bitmap Construction', '2. Lossy Page Read', '3. Heap Recheck', '4. 60,480 Rows Filtered']
       },
       q2_q3: {
         tsMs: 12.01,
         pgMs: 348.69,
-        speedup: '29.05x',
-        headline: 'Continuous Aggregate is 29.05x Faster Than Raw Columnar Scan!',
-        detail: 'TimescaleDB Continuous Aggregate answered in 12.01 ms. Scanning the raw compressed columnar chunks directly required 348.69 ms across 7 parallel partition decoders.'
+        tsPlan: 'Materialized View Seek (Continuous Aggregate)',
+        pgPlan: 'Compressed Chunk Columnar Scan (Decompress On-the-Fly)',
+        tsBuffers: 'Buffers: 932 hit',
+        pgBuffers: 'Chunks: 7 columnar reads',
+        headline: 'Execution Completed: 29.05x Speedup vs Raw Columnar Scan',
+        delta: '-336.68 ms',
+        detail: 'Continuous aggregate served the rollup in 12.01 ms. Directly querying raw compressed chunks required decompressing Gorilla and Delta-of-Delta segment vectors across 7 chunks on-the-fly, requiring 348.69 ms.',
+        tsSteps: ['1. Plan & Rewrite', '2. Range Check', '3. Materialized Seek', '4. 3,360 Rows Returned'],
+        pgSteps: ['1. Chunk Append', '2. Vector Decompress', '3. Hash Grouping', '4. 1.21M Rows Computed']
       }
     };
 
-    function updateQueryInfo() {
-      // Reset race bars when query changes
+    function changeQueryScenario() {
+      const qKey = document.getElementById('query-select').value;
+      const sc = benchmarkScenarios[qKey];
+      
+      document.getElementById('ts-plan-type').innerText = sc.tsPlan;
+      document.getElementById('pg-plan-type').innerText = sc.pgPlan;
+      document.getElementById('ts-buffer-count').innerText = sc.tsBuffers;
+      document.getElementById('pg-buffer-count').innerText = sc.pgBuffers;
+
+      // Reset progress
       document.getElementById('ts-progress').style.width = '0%';
       document.getElementById('pg-progress').style.width = '0%';
-      document.getElementById('ts-timer').innerText = '0.0 ms';
-      document.getElementById('pg-timer').innerText = '0.0 ms';
-      document.getElementById('ts-status-text').classList.add('hidden');
-      document.getElementById('pg-status-text').classList.add('hidden');
-      document.getElementById('race-winner-banner').classList.add('hidden');
+      document.getElementById('ts-timer').innerText = '0.00 ms';
+      document.getElementById('pg-timer').innerText = '0.00 ms';
+      document.getElementById('ts-label').classList.add('hidden');
+      document.getElementById('pg-label').classList.add('hidden');
+      document.getElementById('benchmark-outcome').classList.add('hidden');
+
+      // Update step labels
+      for (let i = 1; i <= 4; i++) {
+        const tsEl = document.getElementById(`ts-step-${i}`);
+        const pgEl = document.getElementById(`pg-step-${i}`);
+        tsEl.className = 'text-slate-500 flex items-center gap-1.5';
+        pgEl.className = 'text-slate-500 flex items-center gap-1.5';
+        tsEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> ${sc.tsSteps[i-1]}`;
+        pgEl.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-slate-600"></span> ${sc.pgSteps[i-1]}`;
+      }
     }
 
-    // Interactive Race Simulator
-    let raceRunning = false;
-    function startRace() {
-      if (raceRunning) return;
-      raceRunning = true;
+    // Interactive Benchmark Runner Simulation
+    let raceActive = false;
+    function triggerSimulation() {
+      if (raceActive) return;
+      raceActive = true;
 
       const qKey = document.getElementById('query-select').value;
-      const q = benchData[qKey];
+      const sc = benchmarkScenarios[qKey];
 
-      const btn = document.getElementById('btn-race');
-      btn.classList.add('opacity-50', 'cursor-not-allowed');
+      const btn = document.getElementById('btn-run-query');
+      btn.disabled = true;
+      btn.classList.add('opacity-50');
 
-      // Reset states
-      updateQueryInfo();
+      document.getElementById('ts-progress').style.width = '0%';
+      document.getElementById('pg-progress').style.width = '0%';
+      document.getElementById('ts-label').classList.add('hidden');
+      document.getElementById('pg-label').classList.add('hidden');
+      document.getElementById('benchmark-outcome').classList.add('hidden');
 
-      // TimescaleDB finishes almost instantly
-      setTimeout(() => {
-        document.getElementById('ts-progress').style.width = '100%';
-        document.getElementById('ts-timer').innerText = q.tsMs.toFixed(2) + ' ms';
-        document.getElementById('ts-status-text').classList.remove('hidden');
-      }, 150);
+      // Reset step highlights
+      for (let i = 1; i <= 4; i++) {
+        document.getElementById(`ts-step-${i}`).className = 'text-slate-500 flex items-center gap-1.5';
+        document.getElementById(`pg-step-${i}`).className = 'text-slate-500 flex items-center gap-1.5';
+      }
 
-      // PostgreSQL animates over simulated duration
-      const totalSteps = 40;
-      let currentStep = 0;
-      const intervalMs = (q.pgMs * 1.5) / totalSteps; // scaled for exciting visual pacing
+      // TimescaleDB finishes rapidly (scaled for visual clarity: 250ms visual duration)
+      let tsStart = Date.now();
+      let tsInterval = setInterval(() => {
+        let elapsed = Date.now() - tsStart;
+        let p = Math.min(100, (elapsed / 250) * 100);
+        document.getElementById('ts-progress').style.width = p + '%';
+        let currentMs = ((p / 100) * sc.tsMs).toFixed(2);
+        document.getElementById('ts-timer').innerText = currentMs + ' ms';
 
-      const pgInterval = setInterval(() => {
-        currentStep++;
-        const pct = Math.min(100, Math.round((currentStep / totalSteps) * 100));
-        document.getElementById('pg-progress').style.width = pct + '%';
-        
-        const currentMs = (pct / 100) * q.pgMs;
-        document.getElementById('pg-timer').innerText = currentMs.toFixed(1) + ' ms';
+        if (p >= 25) document.getElementById('ts-step-1').className = 'text-cyan-400 flex items-center gap-1.5 font-bold';
+        if (p >= 50) document.getElementById('ts-step-2').className = 'text-cyan-400 flex items-center gap-1.5 font-bold';
+        if (p >= 75) document.getElementById('ts-step-3').className = 'text-cyan-400 flex items-center gap-1.5 font-bold';
 
-        const scannedRows = Math.round((pct / 100) * 1209600);
-        document.getElementById('pg-live-scan').innerText = `Scanning: ${scannedRows.toLocaleString()} / 1,209,600 rows from disk...`;
-
-        if (pct >= 100) {
-          clearInterval(pgInterval);
-          document.getElementById('pg-status-text').classList.remove('hidden');
-          document.getElementById('pg-timer').innerText = q.pgMs.toFixed(2) + ' ms';
-          document.getElementById('pg-live-scan').innerText = 'Completed full sequential table scan.';
-
-          // Show Winner Banner
-          document.getElementById('winner-headline').innerText = q.headline;
-          document.getElementById('winner-detail').innerText = q.detail;
-          document.getElementById('race-winner-banner').classList.remove('hidden');
-          
-          btn.classList.remove('opacity-50', 'cursor-not-allowed');
-          raceRunning = false;
-          lucide.createIcons();
+        if (p >= 100) {
+          clearInterval(tsInterval);
+          document.getElementById('ts-timer').innerText = sc.tsMs.toFixed(2) + ' ms';
+          document.getElementById('ts-label').innerText = `DONE (${sc.tsMs.toFixed(2)} ms)`;
+          document.getElementById('ts-label').classList.remove('hidden');
+          document.getElementById('ts-step-4').className = 'text-cyan-400 flex items-center gap-1.5 font-bold';
         }
-      }, intervalMs);
+      }, 25);
+
+      // PostgreSQL takes longer (scaled: 1400ms visual duration)
+      let pgStart = Date.now();
+      let pgInterval = setInterval(() => {
+        let elapsed = Date.now() - pgStart;
+        let p = Math.min(100, (elapsed / 1400) * 100);
+        document.getElementById('pg-progress').style.width = p + '%';
+        let currentMs = ((p / 100) * sc.pgMs).toFixed(2);
+        document.getElementById('pg-timer').innerText = currentMs + ' ms';
+
+        if (p >= 25) document.getElementById('pg-step-1').className = 'text-amber-400 flex items-center gap-1.5 font-bold';
+        if (p >= 50) document.getElementById('pg-step-2').className = 'text-amber-400 flex items-center gap-1.5 font-bold';
+        if (p >= 75) document.getElementById('pg-step-3').className = 'text-amber-400 flex items-center gap-1.5 font-bold';
+
+        if (p >= 100) {
+          clearInterval(pgInterval);
+          document.getElementById('pg-timer').innerText = sc.pgMs.toFixed(2) + ' ms';
+          document.getElementById('pg-label').innerText = `DONE (${sc.pgMs.toFixed(2)} ms)`;
+          document.getElementById('pg-label').classList.remove('hidden');
+          document.getElementById('pg-step-4').className = 'text-amber-400 flex items-center gap-1.5 font-bold';
+
+          // Show outcome summary
+          document.getElementById('outcome-headline').innerText = sc.headline;
+          document.getElementById('outcome-detail').innerText = sc.detail;
+          document.getElementById('benchmark-outcome').classList.remove('hidden');
+
+          btn.disabled = false;
+          btn.classList.remove('opacity-50');
+          raceActive = false;
+        }
+      }, 35);
     }
+
+    // Chart.js: Query Latency Chart
+    const ctxLatency = document.getElementById('chartQueryLatency').getContext('2d');
+    const chartLatency = new Chart(ctxLatency, {
+      type: 'bar',
+      data: {
+        labels: ['Q1/Q3: Hourly Rollup', 'Q4: Single Sensor', 'Q2: Columnar Scan'],
+        datasets: [
+          {
+            label: 'TimescaleDB (ms)',
+            data: [12.01, 1.57, 12.01],
+            backgroundColor: '#00f2fe',
+            borderRadius: 4
+          },
+          {
+            label: 'PostgreSQL 16 (ms)',
+            data: [518.90, 43.28, 348.69],
+            backgroundColor: '#f59e0b',
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } }
+          },
+          x: {
+            grid: { display: false },
+            ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#e2e8f0', font: { family: 'Plus Jakarta Sans', size: 11 } }
+          }
+        }
+      }
+    });
+
+    // Chart.js: Storage Breakdown Chart
+    const ctxStorage = document.getElementById('chartStorage').getContext('2d');
+    const chartStorage = new Chart(ctxStorage, {
+      type: 'bar',
+      data: {
+        labels: ['PostgreSQL 16', 'TimescaleDB'],
+        datasets: [
+          {
+            label: 'Data Tuples / Compressed Chunks (MB)',
+            data: [78.75, 16.94],
+            backgroundColor: ['#d97706', '#0284c7'],
+            borderRadius: 4
+          },
+          {
+            label: 'Index Storage (MB)',
+            data: [74.24, 10.72],
+            backgroundColor: ['#dc2626', '#0ea5e9'],
+            borderRadius: 4
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: {
+            stacked: true,
+            grid: { display: false },
+            ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 11 } }
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#94a3b8', font: { family: 'JetBrains Mono', size: 10 } }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#e2e8f0', font: { family: 'Plus Jakarta Sans', size: 11 } }
+          }
+        }
+      }
+    });
 
     // Populate 20 Sensors Grid
-    const zones = ['Zone A (Assembly)', 'Zone B (Warehouse)', 'Zone C (Furnace)', 'Zone D (Server Room)'];
-    const zoneColors = [
-      'border-blue-900/40 bg-blue-950/20 text-blue-400',
-      'border-emerald-900/40 bg-emerald-950/20 text-emerald-400',
-      'border-amber-900/40 bg-amber-950/20 text-amber-400',
-      'border-purple-900/40 bg-purple-950/20 text-purple-400'
-    ];
+    const sensorZones = {
+      '1': { zone: 'A', name: 'Assembly Line Alpha', temp: 24.12, hum: 45.2, bat: 98.4 },
+      '2': { zone: 'A', name: 'Assembly Line Beta', temp: 24.58, hum: 44.8, bat: 97.9 },
+      '3': { zone: 'A', name: 'Robotic Weld Cell 1', temp: 26.85, hum: 42.1, bat: 96.5 },
+      '4': { zone: 'A', name: 'Robotic Weld Cell 2', temp: 27.10, hum: 41.5, bat: 95.8 },
+      '5': { zone: 'A', name: 'Packaging Conveyor', temp: 23.40, hum: 46.5, bat: 98.1 },
+      '6': { zone: 'B', name: 'Warehouse North Bay', temp: 19.80, hum: 55.4, bat: 99.1 },
+      '7': { zone: 'B', name: 'Warehouse Central Bay', temp: 21.43, hum: 68.21, bat: 98.6 },
+      '8': { zone: 'B', name: 'Warehouse Cold Staging', temp: 15.20, hum: 72.4, bat: 94.2 },
+      '9': { zone: 'B', name: 'Loading Dock Alpha', temp: 22.15, hum: 58.1, bat: 97.3 },
+      '10': { zone: 'B', name: 'Loading Dock Beta', temp: 22.45, hum: 57.8, bat: 96.9 },
+      '11': { zone: 'C', name: 'Induction Furnace 1', temp: 58.40, hum: 18.2, bat: 91.5 },
+      '12': { zone: 'C', name: 'Induction Furnace 2', temp: 62.10, hum: 17.5, bat: 90.8 },
+      '13': { zone: 'C', name: 'Annealing Chamber', temp: 48.70, hum: 22.1, bat: 93.4 },
+      '14': { zone: 'C', name: 'Quench Bath Monitor', temp: 35.60, hum: 38.9, bat: 95.1 },
+      '15': { zone: 'C', name: 'Exhaust Stack Sensor', temp: 74.20, hum: 12.4, bat: 89.2 },
+      '16': { zone: 'D', name: 'Rack Row A (Compute)', temp: 18.40, hum: 48.2, bat: 99.5 },
+      '17': { zone: 'D', name: 'Rack Row B (Storage)', temp: 19.10, hum: 47.9, bat: 99.2 },
+      '18': { zone: 'D', name: 'CRAC Unit Return', temp: 23.80, hum: 43.1, bat: 98.7 },
+      '19': { zone: 'D', name: 'UPS Battery Vault', temp: 21.10, hum: 45.0, bat: 99.0 },
+      '20': { zone: 'D', name: 'Network Core Spine', temp: 20.30, hum: 46.2, bat: 99.4 }
+    };
 
-    const sensorsGrid = document.getElementById('sensors-grid');
-    for (let i = 1; i <= 20; i++) {
-      const zIndex = (i - 1) % 4;
-      const baseTemp = 18.0 + 0.4 * i;
-      const card = document.createElement('div');
-      card.className = `p-3 rounded-xl border ${zoneColors[zIndex]} cursor-pointer hover:border-white transition flex flex-col justify-between`;
-      card.onclick = () => selectSensor(i, zones[zIndex], baseTemp);
-      card.innerHTML = `
-        <div class="flex justify-between items-center text-[10px] font-bold">
-          <span>Node #${i}</span>
-          <span class="w-2 h-2 rounded-full ${i === 7 ? 'bg-cyan-400 animate-pulse' : 'bg-emerald-400'}"></span>
-        </div>
-        <div class="text-sm font-extrabold text-white my-1">${baseTemp.toFixed(1)} &deg;C</div>
-        <div class="text-[9px] text-gray-400">${zones[zIndex].split(' ')[0]}</div>
-      `;
-      sensorsGrid.appendChild(card);
+    function renderSensorsGrid(filter = 'all') {
+      const container = document.getElementById('sensors-grid');
+      container.innerHTML = '';
+
+      for (let i = 1; i <= 20; i++) {
+        const s = sensorZones[i.toString()];
+        if (filter !== 'all' && s.zone !== filter) continue;
+
+        const card = document.createElement('div');
+        card.className = `p-3 bg-[#070b13] border border-white/10 hover:border-cyan-500/50 rounded-xl cursor-pointer transition select-none ${i === 7 ? 'border-cyan-500/50 glow-cyan' : ''}`;
+        card.id = `sensor-card-${i}`;
+        card.onclick = () => selectSensor(i);
+
+        let statusColor = s.temp > 50 ? 'text-amber-400' : (s.temp < 18 ? 'text-blue-400' : 'text-cyan-400');
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 mb-1">
+            <span>S-${String(i).padStart(2, '0')}</span>
+            <span class="px-1.5 py-0.2 rounded bg-white/5 text-[9px] border border-white/10">Z-${s.zone}</span>
+          </div>
+          <div class="text-sm font-bold text-white font-mono ${statusColor}">${s.temp.toFixed(1)} &deg;C</div>
+          <div class="text-[10px] text-slate-400 mt-1 font-mono flex justify-between">
+            <span>${s.hum.toFixed(0)}% RH</span>
+            <span>Bat: ${s.bat.toFixed(0)}%</span>
+          </div>
+        `;
+        container.appendChild(card);
+      }
     }
 
-    function selectSensor(id, zone, temp) {
-      document.getElementById('detail-sensor-badge').innerText = `Sensor ${id}`;
-      document.getElementById('detail-sensor-location').innerText = zone;
-      document.getElementById('detail-temp').innerText = `${temp.toFixed(2)} °C`;
-      document.getElementById('detail-hum').innerText = `${(75.0 - 1.2 * id).toFixed(1)} %`;
+    function selectSensor(id) {
+      document.querySelectorAll('#sensors-grid > div').forEach(el => el.classList.remove('border-cyan-500/50', 'glow-cyan'));
+      const activeCard = document.getElementById(`sensor-card-${id}`);
+      if (activeCard) activeCard.classList.add('border-cyan-500/50', 'glow-cyan');
+
+      const s = sensorZones[id.toString()];
+      document.getElementById('detail-sensor-badge').innerText = `Sensor ${String(id).padStart(2, '0')}`;
+      document.getElementById('detail-sensor-zone').innerText = `Zone ${s.zone} \u2022 ${s.name}`;
+      document.getElementById('detail-temp').innerHTML = `${s.temp.toFixed(2)} &deg;C`;
+      document.getElementById('detail-hum').innerHTML = `${s.hum.toFixed(2)} %`;
     }
 
-    // Render Chart.js Visuals
-    window.addEventListener('DOMContentLoaded', () => {
-      // Query Latency Chart
-      const ctxQuery = document.getElementById('chartQueryLatency').getContext('2d');
-      new Chart(ctxQuery, {
-        type: 'bar',
-        data: {
-          labels: ['Q1: Hourly Rollup', 'Q2: Columnar Scan', 'Q3: Continuous Agg', 'Q4: Single Sensor (PG)', 'Q4: Single Sensor (TS)'],
-          datasets: [{
-            label: 'Latency (ms, Log Scale)',
-            data: [518.90, 348.69, 12.01, 43.28, 1.57],
-            backgroundColor: [
-              'rgba(245, 158, 11, 0.8)',
-              'rgba(59, 130, 246, 0.8)',
-              'rgba(16, 185, 129, 0.9)',
-              'rgba(245, 158, 11, 0.6)',
-              'rgba(16, 185, 129, 0.9)'
-            ],
-            borderColor: [
-              '#f59e0b',
-              '#3b82f6',
-              '#10b981',
-              '#f59e0b',
-              '#10b981'
-            ],
-            borderWidth: 1.5,
-            borderRadius: 6
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              type: 'logarithmic',
-              title: { display: true, text: 'Execution Time (ms)', color: '#9ca3af', font: { size: 10 } },
-              grid: { color: 'rgba(55, 65, 81, 0.3)' },
-              ticks: { color: '#9ca3af', font: { size: 10 } }
-            },
-            x: {
-              grid: { display: false },
-              ticks: { color: '#9ca3af', font: { size: 10 } }
-            }
-          },
-          plugins: {
-            legend: { display: false }
-          }
+    function filterZone(zone) {
+      ['all', 'A', 'B', 'C', 'D'].forEach(z => {
+        const btn = document.getElementById(`zone-btn-${z}`);
+        if (z === zone) {
+          btn.className = 'px-2.5 py-1 rounded-md bg-white/10 text-white font-semibold';
+        } else {
+          btn.className = 'px-2.5 py-1 rounded-md bg-transparent text-slate-400 hover:text-white';
         }
       });
+      renderSensorsGrid(zone);
+    }
 
-      // Storage Chart
-      const ctxStorage = document.getElementById('chartStorage').getContext('2d');
-      new Chart(ctxStorage, {
-        type: 'bar',
-        data: {
-          labels: ['PostgreSQL Total', 'PG Heap Only', 'PG Secondary Indexes', 'TimescaleDB Raw', 'TimescaleDB Compressed'],
-          datasets: [{
-            label: 'Physical Disk (MB)',
-            data: [152.99, 78.75, 74.20, 168.02, 27.66],
-            backgroundColor: [
-              'rgba(245, 158, 11, 0.8)',
-              'rgba(245, 158, 11, 0.5)',
-              'rgba(239, 68, 68, 0.7)',
-              'rgba(59, 130, 246, 0.5)',
-              'rgba(16, 185, 129, 0.9)'
-            ],
-            borderColor: [
-              '#f59e0b',
-              '#f59e0b',
-              '#ef4444',
-              '#3b82f6',
-              '#10b981'
-            ],
-            borderWidth: 1.5,
-            borderRadius: 6
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          scales: {
-            y: {
-              title: { display: true, text: 'Megabytes (MB)', color: '#9ca3af', font: { size: 10 } },
-              grid: { color: 'rgba(55, 65, 81, 0.3)' },
-              ticks: { color: '#9ca3af', font: { size: 10 } },
-              beginAtZero: true
-            },
-            x: {
-              grid: { display: false },
-              ticks: { color: '#9ca3af', font: { size: 10 } }
-            }
-          },
-          plugins: {
-            legend: { display: false }
-          }
-        }
-      });
-    });
+    // Initialize View
+    renderSensorsGrid();
   </script>
 </body>
 </html>

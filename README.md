@@ -33,11 +33,11 @@ To help non-technical evaluators, professors, and reviewers explore the project 
    - Double-click or open `index.html` directly in Google Chrome, Microsoft Edge, or Mozilla Firefox.
 
 ### Dashboard Highlights:
-- **Interactive Query Race:** Live animated side-by-side execution showing TimescaleDB (12 ms) vs PostgreSQL 16 (518.9 ms) scanning 1,209,600 rows.
-- **Storage Footprint Breakdown:** Visual disk representation showing 83.5% physical space reduction via Gorilla delta-of-delta compression and index bloat elimination.
-- **20-Sensor Factory Floor:** Visual industrial sensor grid showing real-time temperature, humidity, and battery degradation across 4 factory zones.
-- **Plain-English Evaluation Guide:** Clear conceptual walkthrough explaining why standard relational engines struggle with temporal workloads and how hypertable chunking solves it.
-- **Direct Deliverables Download:** One-click downloads for the IEEE research paper, presentation deck, and verified plagiarism report.
+- **Query Execution Profiler:** Multi-stage animated execution pipeline showing query acceleration (12 ms vs 518.9 ms) across 1,209,600 tuples with live buffer page tracking.
+- **Physical Storage Analysis:** Component disk breakdown comparing raw heap and B-tree index bloat against Gorilla-compressed columnar chunks (83.53% disk reduction).
+- **20-Node Telemetry Fleet:** Interactive factory floor matrix across 4 industrial zones showing real-time temperature, humidity, and battery decay curves.
+- **System Internals & Execution Plans:** Technical breakdown of hypertable chunk routing, Gorilla bit-packing mechanics, side-by-side `EXPLAIN ANALYZE` tree diffs, and oral examination defense rationale.
+- **Academic Deliverables:** One-click links for the IEEE research paper, presentation deck, verified plagiarism audit, and source code.
 
 
 ---
